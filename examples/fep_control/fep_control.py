@@ -130,7 +130,6 @@ class RecognitionAgent(model.Primitive):
         self._state_dim = kwargs.pop('state_dim', 2)
         self._action_dim = kwargs.pop('action_dim', 1)
         self._observation_dim = kwargs.pop('observation_dim', 2)
-        self._discrete_actions = kwargs.pop('discrete_actions', True)
         self._name = kwargs.pop('name')
         if 'params' not in kwargs:
             kwargs['params'] = {
@@ -140,14 +139,6 @@ class RecognitionAgent(model.Primitive):
                 },
             }
         super(RecognitionAgent, self).__init__(*args, **kwargs)
-        self.decode_policy = nn.Sequential(
-            nn.Linear(self._dyn_dim + self._state_dim, self._state_dim * 4),
-            nn.PReLU(),
-            nn.Linear(self._state_dim * 4, self._action_dim * 16),
-            nn.PReLU(),
-            nn.Linear(self._action_dim * 16, self._action_dim * 2),
-            nn.Softmax(dim=-1) if self._discrete_actions else nn.Identity(),
-        )
         self.encode_state = nn.Sequential(
             nn.Linear(self._observation_dim + 1, self._state_dim * 4),
             nn.PReLU(),
@@ -162,7 +153,7 @@ class RecognitionAgent(model.Primitive):
     def name(self):
         return self._name
 
-    def _forward(self, dynamics=None, prev_control=None, prediction=None,
+    def _forward(self, dynamics=None, prediction=None, control=None,
                  observation=None):
         if observation is not None:
             state = self.encode_state(observation).reshape(-1, self._state_dim,
@@ -175,31 +166,6 @@ class RecognitionAgent(model.Primitive):
                             softplus(prediction['scale']) + 1e-9, name='state')
         if dynamics is None:
             dynamics = self.param_sample(Normal, 'dynamics')
-        if prev_control is None:
-            prev_control = torch.zeros(*self.batch_shape, self._action_dim).to(
-                state
-            )
-
-        control = self.decode_policy(torch.cat((dynamics, state), dim=-1))
-        if self._discrete_actions:
-            control = self.sample(OneHotCategorical, probs=control,
-                                  name='control')
-        else:
-            control = control.reshape(-1, self._action_dim, 2)
-            if not self.q and observation is not None:
-                action = torch.normal(
-                    hardtanh(prev_control[0] + control[0, :, 0]),
-                    softplus(control[0, :, 1]) + 1e-9
-                )
-                action = action.expand(*self.batch_shape, self._action_dim)
-            elif self.q:
-                action = self.q['control'].value
-            else:
-                action = None
-            control = self.sample(Normal,
-                                  hardtanh(prev_control + control[:, :, 0]),
-                                  softplus(control[:, :, 1]) + 1e-9,
-                                  value=action, name='control')
 
 class MountainCarEnergy(NormalEnergy):
     def __init__(self, batch_shape):
