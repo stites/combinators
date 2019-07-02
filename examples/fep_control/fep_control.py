@@ -234,7 +234,6 @@ class MountainCarAgent(GenerativeAgent):
         kwargs['discrete_actions'] = False
         kwargs['action_dim'] = 1
         kwargs['observation_dim'] = 2
-        kwargs['goal'] = MountainCarEnergy(kwargs['batch_shape'])
         super(MountainCarAgent, self).__init__(*args, **kwargs)
 
 class CartpoleEnergy(NormalEnergy):
@@ -251,7 +250,6 @@ class CartpoleAgent(GenerativeAgent):
     def __init__(self, *args, **kwargs):
         kwargs['discrete_actions'] = True
         kwargs['observation_dim'] = 4
-        kwargs['goal'] = CartpoleEnergy(kwargs['batch_shape'])
         super(CartpoleAgent, self).__init__(*args, **kwargs)
 
 class BipedalWalkerEnergy(NormalEnergy):
@@ -270,5 +268,4 @@ class BipedalWalkerAgent(GenerativeAgent):
         kwargs['discrete_actions'] = False
         kwargs['observation_dim'] = 24
         kwargs['action_dim'] = 4
-        kwargs['goal'] = BipedalWalkerEnergy(kwargs['batch_shape'])
         super(BipedalWalkerAgent, self).__init__(*args, **kwargs)
