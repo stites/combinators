@@ -56,7 +56,6 @@ class GenerativeAgent(model.Primitive):
         self._action_dim = kwargs.pop('action_dim', 1)
         self._observation_dim = kwargs.pop('observation_dim', 2)
         self._discrete_actions = kwargs.pop('discrete_actions', True)
-        goal = kwargs.pop('goal')
         if 'params' not in kwargs:
             kwargs['params'] = {
                 'dynamics': {
@@ -78,7 +77,6 @@ class GenerativeAgent(model.Primitive):
                     'scale': torch.ones(self._action_dim),
                 }
         super(GenerativeAgent, self).__init__(*args, **kwargs)
-        self.goal = goal
         self.dynamical_transition = nn.Sequential(
             nn.Linear(self._dyn_dim + self._state_dim + self._action_dim,
                       self._dyn_dim * 4),
@@ -127,7 +125,6 @@ class GenerativeAgent(model.Primitive):
         observation = self.observe('observation', observation, Normal,
                                    observable[:, :, 0],
                                    softplus(observable[:, :, 1]))
-        self.goal(self, observation)
 
         if self._discrete_actions:
             control = self.param_sample(OneHotCategorical, name='control')
