@@ -55,7 +55,6 @@ class GenerativeAgent(model.Primitive):
         self._state_dim = kwargs.pop('state_dim', 2)
         self._action_dim = kwargs.pop('action_dim', 1)
         self._observation_dim = kwargs.pop('observation_dim', 2)
-        self._discrete_actions = kwargs.pop('discrete_actions', True)
         if 'params' not in kwargs:
             kwargs['params'] = {
                 'dynamics': {
@@ -67,15 +66,6 @@ class GenerativeAgent(model.Primitive):
                     'scale': torch.ones(self._state_dim),
                 },
             }
-            if self._discrete_actions:
-                kwargs['params']['control'] = {
-                    'probs': torch.ones(self._action_dim)
-                }
-            else:
-                kwargs['params']['control'] = {
-                    'loc': torch.zeros(self._action_dim),
-                    'scale': torch.ones(self._action_dim),
-                }
         super(GenerativeAgent, self).__init__(*args, **kwargs)
         self.dynamical_transition = nn.Sequential(
             nn.Linear(self._dyn_dim + self._state_dim + self._action_dim,
@@ -106,7 +96,7 @@ class GenerativeAgent(model.Primitive):
             nn.Linear(self._state_dim * 16, (self._observation_dim + 1) * 2)
         )
 
-    def _forward(self, dynamics=None, prev_control=None, prediction=None,
+    def _forward(self, dynamics=None, prediction=None, control=None,
                  observation=None):
         if dynamics is None:
             dynamics = self.param_sample(Normal, 'dynamics')
@@ -114,10 +104,6 @@ class GenerativeAgent(model.Primitive):
             state = self.param_sample(Normal, 'state')
         else:
             state = self.sample(Normal, **prediction, name='state')
-        if prev_control is None:
-            prev_control = torch.zeros(self._action_dim).to(state).expand(
-                *self.batch_shape, self._action_dim,
-            )
 
         observable = self.predict_observation(torch.cat((dynamics, state),
                                                         dim=-1))
@@ -125,11 +111,6 @@ class GenerativeAgent(model.Primitive):
         observation = self.observe('observation', observation, Normal,
                                    observable[:, :, 0],
                                    softplus(observable[:, :, 1]))
-
-        if self._discrete_actions:
-            control = self.param_sample(OneHotCategorical, name='control')
-        else:
-            control = self.param_sample(Normal, 'control')
 
         dynamics = self.dynamical_transition(
             torch.cat((dynamics, state, control), dim=-1)
@@ -141,7 +122,7 @@ class GenerativeAgent(model.Primitive):
             'scale': softplus(next_state[:, :, 1]),
         }
 
-        return dynamics, control, prediction
+        return dynamics, prediction
 
 class RecognitionAgent(model.Primitive):
     def __init__(self, *args, **kwargs):
