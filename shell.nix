@@ -1,28 +1,34 @@
-{ pkgs ? import ./nix/pin/nixpkgs.nix { } }:
-
-with pkgs;
+{ pkgs ? import ./nix/pytorch-world/pin/nixpkgs.nix { } }:
 
 let
-  pkgs-pytorch_041 = import ./nix/pin/nixpkgs-pytorch_04.nix { };
+  cudatoolkit = pkgs.cudatoolkit_10_0;
+  cudnn = pkgs.cudnn_cudatoolkit_10_0;
+  nccl = pkgs.nccl_cudatoolkit_10;
+  cudaSupport = true;
+  mklSupport = true;
+  magma = pkgs.callPackage ./nix/pytorch-world/deps/magma_250.nix { inherit cudatoolkit mklSupport; };
+  openmpi = pkgs.callPackage ./nix/pytorch-world/deps/openmpi.nix { inherit cudatoolkit cudaSupport; };
 
   developmentPython36 =
     let
       mypython = pkgs.python36.override {
         packageOverrides = self: super: rec {
-          numpy_041       = pkgs-pytorch_041.python36Packages.numpy;
-          pytorch_041     = pkgs-pytorch_041.python36Packages.pytorchWithCuda;
-          torchvision_041 = pkgs-pytorch_041.python36Packages.torchvision.override { pytorch = pytorch_041; };
-
-          pytorch_110     = (pkgs.callPackage ./nix/pytorch/release.nix {
-            inherit pkgs; pythonPackages = pkgs.python36Packages;
-          }).pytorchWithCuda10;
-
-          probtorch   = pkgs.callPackage ./nix/probtorch    { inherit (pkgs.python36Packages) buildPythonPackage; pytorch = pytorch_041; };
-          flatdict    = pkgs.callPackage ./nix/flatdict.nix { inherit (pkgs.python36Packages) buildPythonPackage fetchPypi; };
-          pygtrie     = pkgs.callPackage ./nix/pygtrie.nix  { inherit (pkgs.python36Packages) buildPythonPackage fetchPypi; };
-          matplotlib  = pkgs.python36Packages.matplotlib.override { enableQt = true; numpy = numpy_041; };
-          combinators = pkgs.callPackage ./. {
-            inherit (pkgs.python36Packages) buildPythonPackage;
+          pytorch = super.callPackage ./nix/pytorch-world/pytorch   {
+            openMPISupport = true;
+            inherit mklSupport magma openmpi;
+            inherit cudatoolkit cudnn nccl cudaSupport;
+            buildNamedTensor = true;
+            buildBinaries = true;
+          };
+          # overwrite numpy with explicit mkl support so that other packages play nice.
+          # If you don't do this, pytorch overrides numpy's blas, but this won't proagate
+          # to other packages.
+          numpy       = super.numpy.override { blas = pkgs.mkl; };
+          probtorch   = super.callPackage ./nix/pytorch-world/probtorch { inherit pytorch; };
+          flatdict    = super.callPackage ./nix/deps/flatdict.nix { };
+          pygtrie     = super.callPackage ./nix/deps/pygtrie.nix  { };
+          matplotlib  = super.matplotlib.override { enableQt = true; };
+          combinators = super.callPackage ./. {
             inherit probtorch flatdict pygtrie matplotlib;
           };
         };
@@ -30,14 +36,12 @@ let
       };
 
     in mypython.withPackages(ps: with ps; [
-      combinators ipywidgets ipython jupyter notebook torchvision_041 pytorch_041 scipy imageio pillow
-    ]); # bokeh is brokehn
+      combinators probtorch ipywidgets ipython jupyter notebook pytorch scipy imageio pillow matplotlib
+    ]);
 in
 
-mkShell {
-  # numpy_041 doesn't get added properly from withPackages
-  buildInputs = [ developmentPython36 pkgs-pytorch_041.python36Packages.pytorchWithCuda pkgs-pytorch_041.python36Packages.numpy ];
+pkgs.mkShell {
+  # For guidelines on a localized, pip-like install, see https://nixos.wiki/wiki/Python
+  buildInputs = [ developmentPython36 ];
 }
-
-
 
