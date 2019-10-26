@@ -1,4 +1,6 @@
-{ lib, fetchFromGitHub, buildPythonPackage, probtorch, flatdict, pygtrie, matplotlib }:
+{ lib, fetchFromGitHub, buildPythonPackage, probtorch, flatdict, pygtrie, matplotlib
+, pytest, pytestrunner, gym
+}:
 
 buildPythonPackage rec {
   pname = "combinators";
@@ -6,8 +8,8 @@ buildPythonPackage rec {
 
   src = ./.;
 
-  doCheck = false;
-  # checkInputs = [ pytest ];
+  doCheck = true;
+  checkInputs = [ pytest pytestrunner gym ];
   propagatedBuildInputs = [ probtorch flatdict pygtrie matplotlib ];
 
   meta = with lib; {

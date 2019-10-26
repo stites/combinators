@@ -1,47 +1,37 @@
-{ pkgs ? import ./nix/pytorch-world/pin/nixpkgs.nix { } }:
+{ cudaSupport ? false, pkgs ? import ./nix/pytorch-world/pin/nixpkgs.nix { } }:
 
 let
-  cudatoolkit = pkgs.cudatoolkit_10_0;
-  cudnn = pkgs.cudnn_cudatoolkit_10_0;
-  nccl = pkgs.nccl_cudatoolkit_10;
-  cudaSupport = true;
-  mklSupport = true;
-  magma = pkgs.callPackage ./nix/pytorch-world/deps/magma_250.nix { inherit cudatoolkit mklSupport; };
-  openmpi = pkgs.callPackage ./nix/pytorch-world/deps/openmpi.nix { inherit cudatoolkit cudaSupport; };
-
-  developmentPython36 =
-    let
-      mypython = pkgs.python36.override {
-        packageOverrides = self: super: rec {
-          pytorch = super.callPackage ./nix/pytorch-world/pytorch   {
-            openMPISupport = true;
-            inherit mklSupport magma openmpi;
-            inherit cudatoolkit cudnn nccl cudaSupport;
-            buildNamedTensor = true;
-            buildBinaries = true;
-          };
-          # overwrite numpy with explicit mkl support so that other packages play nice.
-          # If you don't do this, pytorch overrides numpy's blas, but this won't proagate
-          # to other packages.
-          numpy       = super.numpy.override { blas = pkgs.mkl; };
-          probtorch   = super.callPackage ./nix/pytorch-world/probtorch { inherit pytorch; };
-          flatdict    = super.callPackage ./nix/deps/flatdict.nix { };
-          pygtrie     = super.callPackage ./nix/deps/pygtrie.nix  { };
-          matplotlib  = super.matplotlib.override { enableQt = true; };
-          combinators = super.callPackage ./. {
-            inherit probtorch flatdict pygtrie matplotlib;
-          };
-        };
-        self = mypython;
-      };
-
-    in mypython.withPackages(ps: with ps; [
-      combinators probtorch ipywidgets ipython jupyter notebook pytorch scipy imageio pillow matplotlib
-    ]);
+  developmentPython36 = (pkgs.callPackage ./nix/generic.nix { inherit cudaSupport pkgs; python3 = pkgs.python36; }).python;
 in
 
 pkgs.mkShell {
   # For guidelines on a localized, pip-like install, see https://nixos.wiki/wiki/Python
-  buildInputs = [ developmentPython36 ];
+  buildInputs = [
+    (developmentPython36.withPackages(ps: with ps; [
+      probtorch ipywidgets ipython jupyter notebook pytorch scipy imageio pillow matplotlib
+      # testing
+      pytest pytest-mypy pytestcov
+      # extras
+      pip typeguard
+    ]))
+  ];
+  shellHook = ''
+    echo 'Entering Python Project Environment'
+    set -v
+
+    # extra packages can be installed here
+    unset SOURCE_DATE_EPOCH
+    export PIP_PREFIX="$(pwd)/pip_packages"
+    python_path=(
+      "$PIP_PREFIX/lib/python3.6/site-packages"
+      "$PYTHONPATH"
+    )
+    # use double single quotes to escape bash quoting
+    IFS=: eval 'python_path="''${python_path[*]}"'
+    export PYTHONPATH="$python_path"
+    export MPLBACKEND='Qt4Agg'
+
+    set +v
+  '';
 }
 
