@@ -1,5 +1,5 @@
 { lib, fetchFromGitHub, buildPythonPackage, probtorch, flatdict, pygtrie, matplotlib
-, pytest, pytestrunner, gym
+, doCheck ? true, pytest, pytestrunner, pytest-mypy, pytestcov, gym, protobuf, future, hypothesis
 }:
 
 buildPythonPackage rec {
@@ -8,8 +8,10 @@ buildPythonPackage rec {
 
   src = ./.;
 
-  doCheck = true;
-  checkInputs = [ pytest pytestrunner gym ];
+  inherit doCheck;
+  nativeBuildInputs = lib.optionals doCheck [ pytestrunner ];
+  checkInputs = lib.optionals doCheck [ pytest pytest-mypy pytestcov gym protobuf future hypothesis ];
+  checkPhase = "python setup.py pytest";
   propagatedBuildInputs = [ probtorch flatdict pygtrie matplotlib ];
 
   meta = with lib; {

@@ -8,9 +8,9 @@ pkgs.mkShell {
   # For guidelines on a localized, pip-like install, see https://nixos.wiki/wiki/Python
   buildInputs = [
     (developmentPython36.withPackages(ps: with ps; [
-      probtorch ipywidgets ipython jupyter notebook pytorch scipy imageio pillow matplotlib
+      probtorch ipywidgets ipython jupyter notebook pytorch scipy imageio pillow matplotlib flatdict
       # testing
-      pytest pytest-mypy pytestcov
+      pytest pytest-mypy pytestcov protobuf future hypothesis
       # extras
       pip typeguard
     ]))
