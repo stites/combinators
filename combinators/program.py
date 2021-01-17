@@ -22,29 +22,20 @@ class Program(TraceModule):
     """ superclass of a program? """
     def __init__(self):
         super().__init__()
-        self._conditioning_trace = Trace()
+        self.__trace = None # for tests and debugging
 
     @abstractmethod
     def model(self, trace: Trace, *args:Any, **kwargs:Any) -> Output:
         raise NotImplementedError()
 
-    def forward(self, *args:Any, sample_dims=None, **kwargs:Any) -> Tuple[Trace, Output]:
-        trace = self._conditioning_trace
+    def forward(self, *args:Any, sample_dims=None, **kwargs:Any) -> Tuple[Trace, Optional[Tensor], Output]:
+        trace = self.get_trace()
 
         out = self.model(trace, *args, **get_shape_kwargs(self.model, sample_dims=sample_dims), **kwargs)
 
-        # TODO: enforce purity?
-        self.clear_observations()
-        self._trace = trace
+        self.__trace = trace
 
-        return trace, out
-
-    def with_observations(self, trace:Trace) -> None:
-        self._conditioning_trace = trace_utils.copytrace(trace)
-
-    def clear_observations(self) -> None:
-        # NOTE: the user has to run this! it _should_ be automated
-        self._conditioning_trace = Trace()
+        return trace, None, out
 
     @classmethod
     def factory(cls, fn, name:str = ""):

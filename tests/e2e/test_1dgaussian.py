@@ -1,8 +1,6 @@
 import torch
-import torch.nn as nn
+from torch import nn, optim, Tensor, distributions
 import logging
-from torch import Tensor
-from torch import distributions
 from combinators.densities import Normal
 from combinators.densities.kernels import NormalLinearKernel
 from collections import namedtuple
@@ -37,11 +35,10 @@ class MLPKernel(Kernel):
             nn.Linear(dim_hidden, 1))
 
     def apply_kernel(self, trace, cond_trace, obs):
-        return trace.normal(loc=self.net(obs.detach()),
-                            scale=torch.ones(1),
-                            value=None if self.ext_name not in cond_trace else cond_trace[self.ext_name].value,
-                            name=self.ext_name)
-
+        dist = distributions.Normal(loc=self.net(obs.detach()), scale=torch.ones(1))
+        value = None if self.ext_name not in cond_trace else cond_trace[self.ext_name].value
+        trace_utils.update_RV_address(trace, self.ext_name, dist)
+        return trace[self.ext_name].value
 
 @fixture(autouse=True)
 def seed():
@@ -71,27 +68,28 @@ def test_reverse(seed):
     rev = MLPKernel(dim_hidden=4, ext_name="rev")
 
     ext = Reverse(g, rev)
-    ext()
+    tr, laux, out = ext()
 
-    for k in ext._cache.program.trace.keys():
-        assert torch.equal(ext._cache.program.trace[k].value, ext._cache.kernel.trace[k].value)
+    for k, rv in tr.items():
+        assert torch.equal(rv.value, rev._trace[k].value)
 
 def test_propose_values(seed):
     q = Normal(loc=4, scale=1, name="z_0")
     p = Normal(loc=0, scale=4, name="z_1")
     fwd = MLPKernel(dim_hidden=4, ext_name="z_1")
     rev = MLPKernel(dim_hidden=4, ext_name="z_0")
-    optimizer = torch.optim.Adam([dict(params=x.parameters()) for x in [p, q, fwd, rev]], lr=0.5)
     assert len(list(p.parameters())) == 0
     assert len(list(q.parameters())) == 0
+    optimizer = optim.Adam([dict(params=x.parameters()) for x in [fwd, rev]], lr=0.5)
     fwd_hashes_0 = [thash(t) for t in fwd.parameters()]
     rev_hashes_0 = [thash(t) for t in rev.parameters()]
+    print([t for t in rev.parameters()])
 
     q_ext = Forward(fwd, q)
     p_ext = Reverse(p, rev)
-    extend = Propose(target=p_ext, proposal=q_ext)
+    extend = Propose(target=p_ext, proposal=q_ext, loss_fn = lambda x: x)
 
-    _, log_weights = extend()
+    _, log_weights, _ = extend()
 
     assert isinstance(log_weights, Tensor)
 
@@ -104,10 +102,19 @@ def test_propose_values(seed):
     loss = nvo_avo(log_weights, sample_dims=0).mean()
     loss.backward()
 
+    print()
+    print([t.grad for t in fwd.parameters()])
+    print()
+    print([t.grad for t in rev.parameters()])
+    breakpoint();
+    assert all([t.grad is not None for t in rev.parameters()])
+    assert all([t.grad is not None for t in fwd.parameters()])
+
     optimizer.step()
     fwd_hashes_1 = [thash(t) for t in fwd.parameters()]
     rev_hashes_1 = [thash(t) for t in rev.parameters()]
 
+    breakpoint();
     assert any([l != r for l, r in zip(fwd_hashes_0, fwd_hashes_1)])
     assert any([l != r for l, r in zip(rev_hashes_0, rev_hashes_1)])
 

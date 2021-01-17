@@ -93,6 +93,32 @@ def log_importance_weight(proposal_trace:Trace, target_trace:Trace, batch_dim:in
     return target_trace.log_joint(batch_dim=batch_dim, sample_dims=sample_dims, nodes=target_trace._nodes) - \
         proposal_trace.log_joint(batch_dim=batch_dim, sample_dims=sample_dims, nodes=target_trace._nodes)
 
+@typechecked
+def update_RV_address(trace, name, dist, sample_shape=torch.Size([1,1]), validate=True) -> None:
+    """WARNING: only useful when you know that the trace comes from a copytrace call"""
+
+    mkRV = lambda value: RandomVariable(dist=dist, value=value, provenance=Provenance.SAMPLED)
+
+    if name in trace:
+        value = trace[name].value
+    elif sample_shape is not None:
+        value = dist.rsample(sample_shape) if dist.has_rsample else dist.sample(sample_shape)
+    else:
+        value = dist.rsample() if dist.has_rsample else dist.sample()
+
+    if validate and not (len(value.shape) >= 2):
+        raise RuntimeError("must have at least sample dim + output dim")
+
+    if sample_shape is not None:
+        if not all(map(lambda lr: lr[0] == lr[1], zip(sample_shape, value.shape))):
+            adjust_shape = [*sample_shape, *value.shape[len(sample_shape):]]
+            value = value.view(adjust_shape)
+
+    if name in trace:
+        trace._nodes[name] = mkRV(value)
+    else:
+        trace.append(mkRV(value), name=name)
+
 
 def copysubtrace(tr: Trace, subset: Optional[Set[str]]):
     # FIXME: need to verify that this does the expected thing

@@ -3,8 +3,7 @@
 import torch
 import combinators.trace.utils as trace_utils
 from combinators.tensor.utils import autodevice
-from torch import nn
-from torch import Tensor
+from torch import nn, Tensor, distributions
 from combinators.kernel import Kernel
 from combinators.nnets import LinearMap
 from combinators.embeddings import CovarianceEmbedding
@@ -49,11 +48,10 @@ class NormalKernel(Kernel):
 
         sample_shape = cond_trace[self.ext_from].value.shape
         mu = self.net(cond_trace[self.ext_from].value.detach()) # .view(sample_shape)
+        dist = distributions.Normal(loc=mu, scale=torch.ones_like(mu, device=mu.device))
 
-        return trace.normal(loc=mu,
-                            scale=torch.ones_like(mu, device=mu.device),
-                            value=cond_trace[self.ext_to].value if self.ext_to in cond_trace else None, # this could _and should_ be automated
-                            name=self.ext_to)
+        trace_utils.update_RV_address(trace, self.ext_to, dist, sample_shape=sample_shape, validate=True)
+        return trace[self.ext_to].value
 
     def __repr__(self):
         return f'ext_to={self.ext_to}:' + super().__repr__()
@@ -110,10 +108,11 @@ class MultivariateNormalKernel(Kernel):
         else:
             mu = self.net(cond_trace[self.ext_from].value.detach())
             cov = torch.eye(self.cov_dim, device=mu.device)
-        return trace.multivariate_normal(loc=mu,
-                                         covariance_matrix=cov,
-                                         value=cond_trace[self.ext_to].value if self.ext_to in cond_trace else None,
-                                         name=self.ext_to)
+
+        dist = distributions.MultivariateNormal(loc=mu, covariance_matrix=cov)
+
+        trace_utils.update_RV_address(trace, self.ext_to, dist, sample_shape=None)
+        return trace[self.ext_to].value
 
 class MultivariateNormalLinearKernel(MultivariateNormalKernel):
     def __init__(self, ext_from:str, ext_to:str, loc:Tensor, cov:Tensor):

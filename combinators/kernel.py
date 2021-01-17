@@ -22,15 +22,15 @@ class Kernel(TraceModule):
     """ superclass of a program? """
     def __init__(self) -> None:
         super().__init__()
+        self._trace = None # for tests and debugging
 
     # TODO: do we need *args? I am thinking no for the time being
     @abstractmethod
     def apply_kernel(self, trace: Trace, cond_trace: Trace, outs: Output, sample_dims:Optional[int]=None): #, batch_dim:Optional[int]=None) -> Output:
         raise NotImplementedError()
 
-    def forward(self, cond_trace: Trace, cond_outs: Output, sample_dims=None, validate=True) -> Tuple[Trace, Output]:
-        # get a fresh trace to make sure we don't have inplace mutation
-        trace = Trace()
+    def forward(self, cond_trace: Trace, cond_outs: Output, sample_dims=None, validate=True) -> Tuple[Trace, Optional[Trace], Output]:
+        trace = self.get_trace()
 
         shape_kwargs = dict(sample_dims=sample_dims) if check_passable_kwarg('sample_dims', self.apply_kernel) else dict()
 
@@ -41,4 +41,6 @@ class Kernel(TraceModule):
         # grab anything that is missing from the cond_trace
         full_trace = trace_utils.copytraces(cond_trace, trace)
 
-        return full_trace, out
+        self._trace = full_trace # for tests and debugging
+
+        return full_trace, None, out

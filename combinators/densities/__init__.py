@@ -11,7 +11,7 @@ from combinators.tensor.utils import kw_autodevice, autodevice
 from combinators import Program
 from combinators.embeddings import CovarianceEmbedding
 from combinators.stochastic import Trace, ImproperRandomVariable, RandomVariable, Provenance
-from combinators.types import TraceLike
+import combinators.trace.utils as trace_utils
 
 class Distribution(Program):
     """ Normalized version of Density but trying to limit overly-complex class heirarchies """
@@ -23,18 +23,7 @@ class Distribution(Program):
         self.RandomVariable = RandomVariable
 
     def model(self, trace, sample_shape=torch.Size([1,1]), validate=True):
-        dist = self.dist
-        # FIXME: ensure conditioning a program work like this is automated?
-        value = trace[self.name].value if self.name in trace else \
-            (dist.rsample(sample_shape) if dist.has_rsample else dist.sample(sample_shape))
-        if validate and not (len(value.shape) >= 2):
-            raise RuntimeError("must have at least sample dim + output dim")
-        if not all(map(lambda lr: lr[0] == lr[1], zip(sample_shape, value.shape))):
-            adjust_shape = [*sample_shape, *value.shape[len(sample_shape):]]
-            value = value.view(adjust_shape)
-
-        rv = self.RandomVariable(dist=dist, value=value, provenance=Provenance.SAMPLED)
-        trace.append(rv, name=self.name)
+        trace_utils.update_RV_address(trace, self.name, self.dist, sample_shape=sample_shape, validate=validate)
         return trace[self.name].value
 
     def __repr__(self):
@@ -80,7 +69,7 @@ class Density(Program):
         self.log_density_fn = log_density_fn
         self.RandomVariable = ImproperRandomVariable # might be useful
 
-    def model(self, trace):
+    def model(self, trace, **kwargs):
         assert self.name in trace, "an improper RV can only condition on values in an existing trace"
         rv = ImproperRandomVariable(log_density_fn=self.log_density_fn, value=trace[self.name].value, provenance=Provenance.OBSERVED)
         trace.append(rv, name=self.name)
@@ -154,7 +143,6 @@ class GMM(Density):
             lds.append(ld_i)
         lds_ = torch.stack(lds, dim=0)
         ld = torch.logsumexp(lds_, dim=0)
-        # breakpoint()
         return ld
 
 class RingGMM(GMM):

@@ -3,15 +3,14 @@
 import torch
 import torch.nn as nn
 import logging
-from torch import Tensor
-from torch import distributions
+from torch import Tensor, distributions, optim
 from torch.utils.tensorboard import SummaryWriter
 from pytest import fixture, mark
 from tqdm import trange
 
 import combinators.trace.utils as trace_utils
 from combinators.tensor.utils import kw_autodevice, copy, thash
-from combinators import Forward, Reverse, Propose, Kernel
+from combinators import Forward, Reverse, Propose, Kernel, Condition
 from combinators.metrics import effective_sample_size, log_Z_hat
 from combinators.debug import propagate, print_grads, propagate
 
@@ -37,35 +36,34 @@ def test_tempered_redundant(seed):
     r10, r21 = [MultivariateNormalLinearKernel(ext_from=f'g{i+1}', ext_to=f'g{i}', loc=torch.ones(2), cov=torch.eye(2)) for i in range(0,2)]
 
     # NVI labels:
-    p_prv_tr, _ = g0(sample_shape=sample_shape)
-    g0.with_observations(trace_utils.copytrace(p_prv_tr, detach=p_prv_tr.keys()))
+    p_prv_tr, _, _ = g0(sample_shape=sample_shape)
+    g0 = Condition(g0, trace=p_prv_tr, detach=p_prv_tr.keys())
     q1_ext = Forward(f01, g0)
     p1_ext = Reverse(halfway, r10)
-    extend1 = Propose(target=p1_ext, proposal=q1_ext)
-    state1, lv1 = extend1(sample_shape=sample_shape, sample_dims=0)
+    extend1 = Propose(target=p1_ext, proposal=q1_ext, loss_fn=lambda x: x)
+    traces1, lv1, _ = extend1(sample_shape=sample_shape, sample_dims=0)
 
-    p_prv_tr = state1.target.trace
-    g0.clear_observations()
+    p_prv_tr = traces1.target
 
-    halfway.with_observations(trace_utils.copytrace(p_prv_tr, detach=p_prv_tr.keys()))
+    halfway = Condition(halfway, trace=p_prv_tr, detach=p_prv_tr.keys())
     q2_ext = Forward(f12, halfway)
     p2_ext = Reverse(gK, r21)
-    extend2 = Propose(target=p2_ext, proposal=q2_ext)
-    state2, lv2 = extend2(sample_shape=sample_shape, sample_dims=0)
+    extend2 = Propose(target=p2_ext, proposal=q2_ext, loss_fn=lambda x: x)
+    state2, lv2, _ = extend2(sample_shape=sample_shape, sample_dims=0)
 
 def test_tempered_redundant_trivial(seed):
     # hyperparams
     sample_shape = (100,)
-    num_iterations = 1000
+    num_iterations = 10
 
     # Setup
     g0 = MultivariateNormal(name='g0', loc=torch.ones(2), cov=torch.eye(2)**2)
     gK = MultivariateNormal(name='g2', loc=torch.ones(2)*3, cov=torch.eye(2)**2)
     halfway = Tempered('g1', g0, gK, torch.tensor([0.5]))
-    forwards = [MultivariateNormalKernel(ext_from=f'g{i}', ext_to=f'g{i+1}', loc=torch.ones(2), cov=torch.eye(2)) for i in range(0,2)]
-    reverses = [MultivariateNormalKernel(ext_from=f'g{i+1}', ext_to=f'g{i}', loc=torch.ones(2), cov=torch.eye(2)) for i in range(0,2)]
+    forwards = [MultivariateNormalLinearKernel(ext_from=f'g{i}', ext_to=f'g{i+1}', loc=torch.ones(2), cov=torch.eye(2)) for i in range(0,2)]
+    reverses = [MultivariateNormalLinearKernel(ext_from=f'g{i+1}', ext_to=f'g{i}', loc=torch.ones(2), cov=torch.eye(2)) for i in range(0,2)]
     targets = [g0, halfway, gK]
-    optimizer = torch.optim.Adam([dict(params=x.parameters()) for x in [*forwards, *reverses]], lr=1e-4)
+    optimizer = optim.Adam([dict(params=x.parameters()) for x in [*forwards, *reverses]], lr=1e-4)
 
     # logging
     writer = SummaryWriter()
@@ -74,23 +72,21 @@ def test_tempered_redundant_trivial(seed):
     with trange(num_iterations) as bar:
         for i in bar:
             q0 = targets[0]
-            p_prv_tr, out0 = q0(sample_shape=sample_shape)
+            p_prv_tr, _, out0 = q0(sample_shape=sample_shape)
 
             loss = torch.zeros(1, **kw_autodevice())
             lw, lvs = torch.zeros(sample_shape, **kw_autodevice()), []
             for k, (fwd, rev, q, p) in enumerate(zip(forwards, reverses, targets[:-1], targets[1:])):
-                q.with_observations(trace_utils.copytrace(p_prv_tr, detach=p_prv_tr.keys()))
+                q = Condition(q, p_prv_tr, detach=p_prv_tr.keys())
                 q_ext = Forward(fwd, q, _step=k)
                 p_ext = Reverse(p, rev, _step=k)
-                extend = Propose(target=p_ext, proposal=q_ext, _step=k)
-                state, lv = extend(sample_shape=sample_shape, sample_dims=0)
+                extend = Propose(target=p_ext, proposal=q_ext, _step=k, loss_fn=lambda x: x)
+                traces, lv, _ = extend(sample_shape=sample_shape, sample_dims=0)
 
-                p_prv_tr = state.target.trace
-                p.clear_observations()
-                q.clear_observations()
+                p_prv_tr = traces.target
 
                 lw += lv
-                loss += nvo_rkl(lw, lv, state.proposal.trace[f'g{k}'], state.target.trace[f'g{k+1}'])
+                loss += nvo_rkl(lw, lv, traces.proposal[f'g{k}'], traces.target[f'g{k+1}'])
                 lvs.append(lv)
             loss.backward()
 

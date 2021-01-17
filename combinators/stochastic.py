@@ -5,7 +5,8 @@ import abc
 from enum import Enum
 import re
 import math
-from typing import Callable
+from typing import Callable, Union
+import torch
 from torch import Tensor
 
 import combinators.tensor.utils as tensor_utils
@@ -394,7 +395,7 @@ class Trace(MutableMapping):
                 yield name
 
     def log_joint(self, sample_dims=None, batch_dim=None, nodes=None,
-                  reparameterized=True):
+                  reparameterized=True)->Tensor:
         """Returns the log joint probability, optionally for a subset of nodes.
 
         Arguments:
@@ -405,7 +406,7 @@ class Trace(MutableMapping):
         """
         if nodes is None:
             nodes = self._nodes
-        log_prob = 0.0
+        log_prob = torch.zeros(1)
         for n in nodes:
             if n in self._nodes:
                 node = self._nodes[n]

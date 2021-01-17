@@ -1,0 +1,4 @@
+#+TITLE: Todo
+* Return to combinators semantics
+DEADLINE: <2021-01-15 Fri>
+* run against heiko's exact experimental settings
