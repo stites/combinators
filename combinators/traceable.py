@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 class Conditionable(ABC):
     def __init__(self) -> None:
         super().__init__()
-        self._cond_trace: Optional[Trace] = None
+        self._cond_trace: Optional[Trace] = None # a maybe cond trace to indicate if the program is, in fact, conditioned on (for debugging)
 
     def get_trace(self, evict=False) -> Trace:
         # trace = Trace()

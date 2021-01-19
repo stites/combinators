@@ -2,6 +2,7 @@
 import torch
 from torch import Tensor
 from combinators.stochastic import Trace, Provenance, RandomVariable, ImproperRandomVariable
+from functools import reduce
 from combinators.types import TraceLike
 from typing import Callable, Any, Tuple, Optional, Set
 from copy import deepcopy
@@ -92,6 +93,44 @@ def log_importance_weight(proposal_trace:Trace, target_trace:Trace, batch_dim:in
     assert valeq(proposal_trace, target_trace, nodes=target_trace._nodes, check_exist=check_exist)
     return target_trace.log_joint(batch_dim=batch_dim, sample_dims=sample_dims, nodes=target_trace._nodes) - \
         proposal_trace.log_joint(batch_dim=batch_dim, sample_dims=sample_dims, nodes=target_trace._nodes)
+
+@typechecked
+def update_RV_address(trace, name, dist, cond_trace=None, sample_shape=None, validate=True) -> None:
+    """WARNING: only useful when you know that the trace comes from a copytrace call"""
+    mkRV = lambda value: RandomVariable(dist=dist, value=value, provenance=Provenance.SAMPLED)
+
+    value = value_from(trace, name, dist=dist, cond_trace=cond_trace, reparameterized=None, sample_shape=sample_shape)
+
+    # if validate and not (len(value.shape) >= 2):
+    #     raise RuntimeError("must have at least sample dim + output dim")
+    #
+    # if sample_shape is not None:
+    #     if not all(map(lambda lr: lr[0] == lr[1], zip(sample_shape, value.shape))):
+    #         adjust_shape = [*sample_shape, *value.shape[len(sample_shape):]]
+    #         value = value.view(adjust_shape)
+
+    if name in trace:
+        trace._nodes[name] = mkRV(value)
+    else:
+        trace.append(mkRV(value), name=name)
+
+def value_from(trace, addr, dist=None, cond_trace=None, reparameterized=None, sample_shape=None)->Tensor:
+    if addr in trace:
+        return trace[addr].value
+    elif cond_trace is not None and addr in cond_trace:
+        return cond_trace[addr].value
+    elif dist is not None:
+        def sampler(reparam):
+            shape = dict(filter(lambda kv: kv[1] is not None, [('sample_shape',sample_shape)]))
+            return dist.rsample(**shape) if reparam else dist.sample(**shape)
+
+        value = sampler(reparameterized) if reparameterized is not None else sampler(dist.has_rsample)
+        if len(value.shape) == 0:
+            return value.unsqueeze(0)
+        else:
+            return value
+    else:
+        raise RuntimeError("impossible")
 
 
 def copysubtrace(tr: Trace, subset: Optional[Set[str]]):

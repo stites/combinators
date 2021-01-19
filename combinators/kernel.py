@@ -28,17 +28,19 @@ class Kernel(TraceModule):
     def apply_kernel(self, trace: Trace, cond_trace: Trace, outs: Output, sample_dims:Optional[int]=None): #, batch_dim:Optional[int]=None) -> Output:
         raise NotImplementedError()
 
-    def forward(self, cond_trace: Trace, cond_outs: Output, sample_dims=None, validate=True) -> Tuple[Trace, Output]:
+    def forward(self, cond_trace: Trace, cond_outs: Output, sample_dims=None, validate=True) -> Tuple[Trace, Optional[Tensor], Output]:
         # get a fresh trace to make sure we don't have inplace mutation
-        trace = Trace()
+        # trace = Trace()
+        trace = self.get_trace()
 
         shape_kwargs = dict(sample_dims=sample_dims) if check_passable_kwarg('sample_dims', self.apply_kernel) else dict()
 
         out = self.apply_kernel(trace, cond_trace, cond_outs, **shape_kwargs)#, batch_dim=batch_dim)
+
         if validate and not trace_utils.valeq(cond_trace, trace):
             raise RuntimeError("RVs in trace are not correctly conditioned on the cond_trace")
 
         # grab anything that is missing from the cond_trace
         full_trace = trace_utils.copytraces(cond_trace, trace)
 
-        return full_trace, out
+        return full_trace, None, out

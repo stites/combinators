@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 
 import torch
+from torch import nn, Tensor, distributions
+
 import combinators.trace.utils as trace_utils
 from combinators.tensor.utils import autodevice
-from torch import nn
-from torch import Tensor
 from combinators.kernel import Kernel
 from combinators.nnets import LinearMap
 from combinators.embeddings import CovarianceEmbedding
@@ -31,7 +31,7 @@ class NormalKernel(Kernel):
         self.ext_from = ext_from
         self.ext_to = ext_to
 
-    def apply_kernel(self, trace, cond_trace, cond_output, sample_dims=None):
+    def xapply_kernel(self, trace, cond_trace, cond_output, sample_dims=None):
         # TODO: super annoying... I will just assume there is always a sample dimension and will need to add some more guardrails
         # if sample_dims is not None:
         #     if len(cond_output.shape) == 1:
@@ -54,6 +54,14 @@ class NormalKernel(Kernel):
                             scale=torch.ones_like(mu, device=mu.device),
                             value=cond_trace[self.ext_to].value if self.ext_to in cond_trace else None, # this could _and should_ be automated
                             name=self.ext_to)
+
+    def apply_kernel(self, trace, cond_trace, cond_output, sample_dims=None):
+        sample_shape = cond_trace[self.ext_from].value.shape
+        mu = self.net(cond_trace[self.ext_from].value.detach()) # .view(sample_shape)
+
+        dist = distributions.Normal(loc=mu, scale=torch.ones_like(mu, device=mu.device))
+        trace_utils.update_RV_address(trace, self.ext_to, dist, cond_trace=cond_trace)
+        return trace[self.ext_to].value
 
     def __repr__(self):
         return f'ext_to={self.ext_to}:' + super().__repr__()

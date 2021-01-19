@@ -1,6 +1,6 @@
 from collections import OrderedDict
 from collections.abc import MutableMapping
-from probtorch.util import batch_sum, partial_sum, log_mean_exp
+from combinators.probtorch.util import batch_sum, partial_sum, log_mean_exp
 import abc
 from enum import Enum
 import re

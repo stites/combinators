@@ -6,8 +6,9 @@ from functools import partial, reduce
 from torch import Tensor, distributions, Size, nn
 import torch.distributions as D
 from typing import Optional, Dict, Union, Callable
-from combinators.tensor.utils import kw_autodevice, autodevice
 
+import combinators.trace.utils as trace_utils
+from combinators.tensor.utils import kw_autodevice, autodevice
 from combinators import Program
 from combinators.embeddings import CovarianceEmbedding
 from combinators.stochastic import Trace, ImproperRandomVariable, RandomVariable, Provenance
@@ -22,16 +23,15 @@ class Distribution(Program):
         self.dist = dist
         self.RandomVariable = RandomVariable
 
-    def model(self, trace, sample_shape=torch.Size([1,1]), validate=True):
+    def model(self, trace, sample_shape=None, validate=True):
         dist = self.dist
         # FIXME: ensure conditioning a program work like this is automated?
-        value = trace[self.name].value if self.name in trace else \
-            (dist.rsample(sample_shape) if dist.has_rsample else dist.sample(sample_shape))
-        if validate and not (len(value.shape) >= 2):
-            raise RuntimeError("must have at least sample dim + output dim")
-        if not all(map(lambda lr: lr[0] == lr[1], zip(sample_shape, value.shape))):
-            adjust_shape = [*sample_shape, *value.shape[len(sample_shape):]]
-            value = value.view(adjust_shape)
+        value = trace_utils.value_from(trace, self.name, dist=self.dist, cond_trace=None, reparameterized=None, sample_shape=sample_shape)
+        # if validate and not (len(value.shape) >= 2):
+        #     raise RuntimeError("must have at least sample dim + output dim")
+        # if not all(map(lambda lr: lr[0] == lr[1], zip(sample_shape, value.shape))):
+        #     adjust_shape = [*sample_shape, *value.shape[len(sample_shape):]]
+        #     value = value.view(adjust_shape)
 
         rv = self.RandomVariable(dist=dist, value=value, provenance=Provenance.SAMPLED)
         trace.append(rv, name=self.name)

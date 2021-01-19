@@ -17,10 +17,12 @@ import combinators.trace.utils as trace_utils
 from combinators.metrics import effective_sample_size
 from combinators.debug import propagate
 from combinators.objectives import nvo_avo
+from combinators.program import Cond
 from combinators.tensor.utils import thash, show, autodevice, kw_autodevice
-from combinators.inference import PCache # temporary
+from combinators.inference import PCache, State # temporary
 from combinators.stochastic import RandomVariable, Provenance
 from combinators import Program, Kernel, Trace, Forward, Reverse, Propose
+from typing import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -28,19 +30,23 @@ eval_mean_std = assert_empirical_marginal_mean_std
 
 @typechecked
 class MLPKernel(Kernel):
-    def __init__(self, dim_hidden, ext_name):
+    def __init__(self, dim_hidden, ext_to):
         super().__init__()
-        self.ext_name = ext_name
+        self.ext_to = ext_to
         self.net = nn.Sequential(
             nn.Linear(1, dim_hidden), nn.Sigmoid(),
             nn.Linear(dim_hidden, dim_hidden), nn.Sigmoid(),
             nn.Linear(dim_hidden, 1))
 
-    def apply_kernel(self, trace, cond_trace, obs):
+    def xapply_kernel(self, trace, cond_trace, obs):
         return trace.normal(loc=self.net(obs.detach()),
                             scale=torch.ones(1),
-                            value=None if self.ext_name not in cond_trace else cond_trace[self.ext_name].value,
-                            name=self.ext_name)
+                            value=None if self.ext_to not in cond_trace else cond_trace[self.ext_to].value,
+                            name=self.ext_to)
+    def apply_kernel(self, trace, cond_trace, obs):
+        dist = distributions.Normal(loc=self.net(obs.detach()), scale=torch.ones(1))
+        trace_utils.update_RV_address(trace, self.ext_to, dist, cond_trace=cond_trace)
+        return trace[self.ext_to].value
 
 
 @fixture(autouse=True)
@@ -50,7 +56,7 @@ def seed():
 
 def test_forward(seed):
     g = Normal(loc=0, scale=1, name="g")
-    fwd = MLPKernel(dim_hidden=4, ext_name="fwd")
+    fwd = MLPKernel(dim_hidden=4, ext_to="fwd")
 
     ext = Forward(fwd, g)
     ext()
@@ -60,15 +66,15 @@ def test_forward(seed):
 
 def test_forward_forward(seed):
     g0 = Normal(loc=0, scale=1, name="g0")
-    f01 = MLPKernel(dim_hidden=4, ext_name="g1")
-    f12 = MLPKernel(dim_hidden=4, ext_name="g2")
+    f01 = MLPKernel(dim_hidden=4, ext_to="g1")
+    f12 = MLPKernel(dim_hidden=4, ext_to="g2")
 
     ext = Forward(f12, Forward(f01, g0))
     ext()
 
 def test_reverse(seed):
     g = Normal(loc=0, scale=1, name="g")
-    rev = MLPKernel(dim_hidden=4, ext_name="rev")
+    rev = MLPKernel(dim_hidden=4, ext_to="rev")
 
     ext = Reverse(g, rev)
     ext()
@@ -79,8 +85,8 @@ def test_reverse(seed):
 def test_propose_values(seed):
     q = Normal(loc=4, scale=1, name="z_0")
     p = Normal(loc=0, scale=4, name="z_1")
-    fwd = MLPKernel(dim_hidden=4, ext_name="z_1")
-    rev = MLPKernel(dim_hidden=4, ext_name="z_0")
+    fwd = MLPKernel(dim_hidden=4, ext_to="z_1")
+    rev = MLPKernel(dim_hidden=4, ext_to="z_0")
     optimizer = torch.optim.Adam([dict(params=x.parameters()) for x in [p, q, fwd, rev]], lr=0.5)
     assert len(list(p.parameters())) == 0
     assert len(list(q.parameters())) == 0
@@ -114,8 +120,8 @@ def test_propose_values(seed):
 def test_propose_gradients(seed):
     q = Normal(loc=4, scale=1, name="z_0")
     p = Normal(loc=0, scale=4, name="z_1")
-    fwd = MLPKernel(dim_hidden=4, ext_name="z_1")
-    rev = MLPKernel(dim_hidden=4, ext_name="z_0")
+    fwd = MLPKernel(dim_hidden=4, ext_to="z_1")
+    rev = MLPKernel(dim_hidden=4, ext_to="z_0")
     optimizer = torch.optim.Adam([dict(params=x.parameters()) for x in [p, q, fwd, rev]], lr=0.5)
 
     q_ext = Forward(fwd, q)
@@ -135,23 +141,66 @@ def test_1step_avo(seed):
 
     target_params, proposal_params = all_params = [Params(4, 1), Params(1, 4)]
     target,        proposal        = [Normal(*p, name=f'z_{p.loc}') for p in all_params]
-    fwd, rev = [MLPKernel(dim_hidden=4, ext_name=f'z_{ext_mean}') for ext_mean in [4, 1]]
+    # fwd, rev = [MLPKernel(dim_hidden=4, ext_to=f'z_{ext_mean}') for ext_mean in [4, 1]]
+    fwd, rev = [NormalLinearKernel(ext_to=f'z_{mu_to}', ext_from=f'z_{mu_from}') for mu_from, mu_to in [(1,4), (4,1)]]
 
     optimizer = torch.optim.Adam([dict(params=x.parameters()) for x in [proposal, target, fwd, rev]], lr=0.01)
 
-    num_steps = 100
+    num_steps = 120 # default setting: 1000
     loss_ct, loss_sum, loss_avgs, loss_all = 0, 0.0, [], []
 
+    def test():
+        dist = proposal.as_dist(as_multivariate=True)
+        analytic = propagate(N=dist, F=fwd.weight(), t=fwd.bias(), B=dist.covariance_matrix, marginalize=True)
+        print(analytic)
+
+    print()
+    print(test())
     with trange(num_steps) as bar:
         for i in bar:
             optimizer.zero_grad()
             q_ext = Forward(fwd, proposal)
             p_ext = Reverse(target, rev)
-            extend = Propose(target=p_ext, proposal=q_ext)
 
-            _, log_weights = extend(sample_shape=(200,1), sample_dims=0)
 
-            proposal.clear_observations() # FIXME: this can be automated, but it would be nice to have more infrastructure around observations
+            # extend = Propose(target=p_ext, proposal=q_ext)
+            # ===================================================================
+
+            # FIXME: target and proposal args can / should be separated
+            qtr, qlv, qout = q_ext(sample_shape=(200,1), sample_dims=0)
+            # ----------------------------------------------------------------------------------------------
+            # program_state = State(*q_ext._run_program(q_ext.program, sample_shape=(200,1), sample_dims=0))
+            # kernel_state = State(*q_ext._run_kernel(q_ext.kernel, *program_state, sample_dims=0))
+            # q_ext._cache = KCache(program_state, kernel_state)
+            # plv = kernel_state.trace.log_joint(batch_dim=None, sample_dims=0)
+            # qtr, qlv, qout = kernel_state.trace, plv, kernel_state.output
+            # ----------------------------------------------------------------------------------------------
+            proposal_state = State(qtr, qlv, qout)
+
+            # self.target.condition_on(proposal_state.trace)
+            # target_state = State(*self.target(*shared_args, **shared_kwargs))
+            # self.target.clear_conditions()
+
+            # conditions = dict(cond_trace=copytrace(proposal_state.trace, requires_grad=RequiresGrad.YES)) if isinstance(self.target, (Reverse, Kernel)) else dict()
+            # ptr, plv, pout = self.target(*shared_args, sample_dims=sample_dims, **shared_kwargs, **conditions)
+            conditioned_target = Cond(p_ext, proposal_state.trace)
+            ptr, plv, pout = conditioned_target(*shared_args, sample_dims=sample_dims, **shared_kwargs)
+            target_state = State(ptr, plv, pout)
+            # print(plv)
+
+            joint_target_trace = ptr
+            _cache = PCache(target_state, proposal_state)
+            state = _cache
+
+            lv = qlv - plv
+
+            # ===================================================================
+            # _, log_weights = extend(sample_shape=(200,1), sample_dims=0)
+            log_weights = lv
+            breakpoint();
+
+
+            # proposal.clear_observations() # FIXME: this can be automated, but it would be nice to have more infrastructure around observations
             loss = nvo_avo(log_weights).mean()
 
             loss.backward()
@@ -173,7 +222,26 @@ def test_1step_avo(seed):
                if num_steps > 100:
                    loss_avgs.append(loss_avg)
     with torch.no_grad():
-        assert_empirical_marginal_mean_std(lambda: Forward(fwd, proposal)()[1], target_params, Tolerance(loc=0.15, scale=0.15))
+
+        # def assert_empirical_marginal_mean_std(runnable:Callable[[], Tensor], target_params:Params, tolerances:Tolerance, num_validate_samples = 400):
+        #     eval_loc, eval_scale = empirical_marginal_mean_std(runnable, num_validate_samples = num_validate_samples)
+        #     print("loc: {:.4f}, scale: {:.4f}".format(eval_loc, eval_scale))
+        #     assert (target_params.loc  - tolerances.loc ) < eval_loc and  eval_loc < (target_params.loc  + tolerances.loc)
+        #     assert (target_params.scale - tolerances.scale) < eval_scale and  eval_scale < (target_params.scale + tolerances.scale)
+        #
+        # runnable = lambda: Forward(fwd, proposal)()[1]
+        # samples = []
+        # num_validate_samples = 400
+        # for _ in range(num_validate_samples):
+        #     out = Forward(fwd, proposal)()[-1]
+        #
+        #     samples.append(out)
+        # evaluation = torch.cat(samples)
+        # eval_loc, eval_scale = evaluation.mean().item(), evaluation.std().item()
+        # breakpoint();
+
+
+        assert_empirical_marginal_mean_std(lambda: Forward(fwd, proposal)()[-1], target_params, Tolerance(loc=0.15, scale=0.15))
 
 
 def test_2step_avo(seed):
@@ -183,8 +251,8 @@ def test_2step_avo(seed):
     With four steps, you'll need to detach whenever you compute a normalizing constant in all the intermediate steps.
     """
     g1, g2, g3 = targets = [Normal(loc=i, scale=1, name=f"z_{i}") for i in range(1,4)]
-    f12, f23 = forwards = [NormalLinearKernel(ext_name=f"z_{i}").to(autodevice()) for i in range(2,4)]
-    r21, r32 = reverses = [NormalLinearKernel(ext_name=f"z_{i}").to(autodevice()) for i in range(1,3)]
+    f12, f23 = forwards = [NormalLinearKernel(ext_to=f"z_{i}").to(autodevice()) for i in range(2,4)]
+    r21, r32 = reverses = [NormalLinearKernel(ext_to=f"z_{i}").to(autodevice()) for i in range(1,3)]
 
     optimizer = torch.optim.Adam([dict(params=x.parameters()) for x in [*forwards, *reverses, *targets]], lr=1e-2)
 
@@ -285,12 +353,12 @@ def test_4step_avo(seed):
     4-step NVI-sequential: 8 intermediate densities
     """
     g1, g2, g3, g4, g5 = targets = [Normal(loc=i, scale=1, name=f"z_{i}") for i in range(1,6)]
-    f12, f23, f34, f45 = forwards = [NormalLinearKernel(ext_name=f"z_{i}") for i in range(2,6)]
-    r21, r32, r43, r54 = reverses = [NormalLinearKernel(ext_name=f"z_{i}") for i in range(1,5)]
-    assert r21.ext_name == "z_1"
-    assert f12.ext_name == "z_2"
-    assert r54.ext_name == "z_4"
-    assert f45.ext_name == "z_5"
+    f12, f23, f34, f45 = forwards = [NormalLinearKernel(ext_from=f"z_{i-1}", ext_to=f"z_{i}") for i in range(2,6)]
+    r21, r32, r43, r54 = reverses = [NormalLinearKernel(ext_from=f"z_{i+1}", ext_to=f"z_{i}") for i in range(1,5)]
+    assert r21.ext_to == "z_1"
+    assert f12.ext_to == "z_2"
+    assert r54.ext_to == "z_4"
+    assert f45.ext_to == "z_5"
 
     optimizer = torch.optim.Adam([dict(params=x.parameters()) for x in [*forwards, *reverses, *targets]], lr=1e-2)
 
@@ -301,19 +369,16 @@ def test_4step_avo(seed):
     with trange(num_steps) as bar:
         for i in bar:
             q0 = targets[0]
-            p_prv_tr, out0 = q0(sample_shape=sample_shape)
+            p_prv_tr, _, out0 = q0(sample_shape=sample_shape)
             loss = torch.zeros(1)
 
             lvs = []
             for fwd, rev, q, p in zip(forwards, reverses, targets[:-1], targets[1:]):
-                q.with_observations(trace_utils.copytrace(p_prv_tr, detach=p_prv_tr.keys()))
                 q_ext = Forward(fwd, q)
                 p_ext = Reverse(p, rev)
                 extend_argument = Propose(target=p_ext, proposal=q_ext)
                 # state, lv = extend_argument(sample_shape=sample_shape) # TODO
-                state, lv = extend_argument(sample_shape=sample_shape, sample_dims=0)
-                q.clear_observations()
-                p.clear_observations()
+                state, lv, _ = extend_argument(sample_shape=sample_shape, sample_dims=0)
 
                 lvs.append(lv)
 
