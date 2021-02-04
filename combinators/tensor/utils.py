@@ -8,19 +8,23 @@ import hashlib
 import os
 
 @typechecked
-def autodevice(preference:Union[int, str, None]=None)->str:
-    if isinstance(preference, str):
+def autodevice(preference:Union[int, str, None, torch.device]=None)->torch.device:
+    if isinstance(preference, torch.device):
         return preference
     else:
-        if not torch.cuda.is_available() or os.getenv('CUDA_VISIBLE_DEVICES') == '':
-            return "cpu"
-        elif isinstance(preference, int):
-            return f"cuda:{preference}"
+        if isinstance(preference, str):
+            devstr = preference
         else:
-            return "cuda"
+            if not torch.cuda.is_available() or os.getenv('CUDA_VISIBLE_DEVICES') == '':
+                devstr = "cpu"
+            elif isinstance(preference, int):
+                devstr = f"cuda:{preference}"
+            else:
+                devstr = "cuda"
+        return torch.device(devstr)
 
 @typechecked
-def kw_autodevice(preference:Union[int, str, None]=None)->Dict[str, Optional[str]]:
+def kw_autodevice(preference:Union[int, str, None, torch.device]=None)->Dict[str, torch.device]:
     return dict(device=autodevice(preference))
 
 def _hash(t:Tensor, length:int):
@@ -39,11 +43,13 @@ def thash(aten:Tensor, length:int=8, with_ref=False, no_grad_char:str=" ")->str:
         v = _hash(save_ref.cpu().numpy(), length)
         return f'#{g}{v}'
 
+def prettyshape(size):
+    return "[]" if len(size) == 0 else f"[{'×'.join(map(str, size))}]"
+
 @typechecked
 def show(aten:Tensor, fix_width:bool=True)->str:
     t = str(aten.dtype).split(".")[-1]
-    s = "×".join(map(str, aten.shape))
-    return f"{t}[{s}]{thash(aten)}"
+    return f"{t}{prettyshape(aten.size())}{thash(aten)}"
 
 @typechecked
 def copy(aten:Tensor, requires_grad=False, deepcopy=False)->Tensor:

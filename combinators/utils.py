@@ -43,7 +43,7 @@ def load_models(model, filename, weights_dir="./weights"):
 
     checkpoint = torch.load(f'{weights_dir}/{filename}')
 
-    return {k: v.state_dict(checkpoint[k]) for k, v in model.items()}
+    return {k: v.load_state_dict(checkpoint[k]) for k, v in model.items()}
 
 def adam(models, **kwargs):
     iterable = models.values() if isinstance(models, dict) else models

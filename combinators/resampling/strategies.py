@@ -28,7 +28,7 @@ def ancestor_indices_systematic(lw, sample_dim=0, batch_dim=1):
     else:
         _batch_dim = batch_dim
     n, b = lw.shape[sample_dim], lw.shape[_batch_dim]
-    u = torch.rand(b)
+    u = torch.rand(b, device=lw.device)
     usteps = torch.stack([(k + u) for k in range(n)], dim=_batch_dim)/n
     nws = F.softmax(lw.detach(), dim=sample_dim)
     csum = nws.transpose(sample_dim, -1).cumsum(dim=-1)
