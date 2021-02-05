@@ -142,3 +142,6 @@ nix/antlr4.nix
 nix/hydra.nix
 runs/
 *.bk
+data
+weights/
+icml/

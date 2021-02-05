@@ -54,7 +54,7 @@ def anneal_between(left, right, total_num_targets,device=None):
 
     # Make an annealing path
     betas = torch.arange(0., 1., 1./(total_num_targets - 1), device=device)[1:] # g_0 is beta=0
-    path = [Tempered(f'g{k}', left, right, beta) for k, beta in zip(range(1,total_num_targets-1), betas)]
+    path = [Tempered(f'g{k}', left, right, beta).to(autodevice(device)) for k, beta in zip(range(1,total_num_targets-1), betas)]
     path = [left] + path + [right]
 
     assert len(path) == total_num_targets # sanity check that the betas line up
@@ -79,10 +79,10 @@ def mk_mvn(i, loc, std=1, device=None):
 def mk_n(i, loc, device=None):
     return Normal(name=f'g{i}', loc=torch.ones(1, **kw_autodevice(device))*loc, scale=torch.ones(1, **kw_autodevice(device))**2)
 
-def paper_model(device=None):
-    num_targets = 8
+def paper_model(device=None, num_targets=6):
+    num_targets = num_targets
     g0 = mk_mvn(0, 0, std=5, device=device)
-    gK = RingGMM(loc_scale=10, scale=0.5, count=8, name=f"g{num_targets - 1}").to(autodevice(device))
+    gK = RingGMM(loc_scale=10, scale=0.5, count=8, name=f"g{num_targets - 1}", device=device).to(autodevice(device))
 
     def paper_kernel(from_:int, to_:int, std:float):
         return mk_kernel(from_, to_, std, num_hidden=50, learn_cov=True, activation=nn.Sigmoid, device=device)
