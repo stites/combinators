@@ -14,11 +14,9 @@ def rws_hmc(args):
 
     data_dir = './dataset/'
     timesteps_train = 10
-    timesteps_test = 10
     frame_pixels = 96
     shape_pixels = 28
     num_objects_train = 3
-    num_objects_test = 3
 
     device = 'cuda:1'
     num_epochs = 1000
@@ -43,7 +41,7 @@ def rws_hmc(args):
     data_paths = []
     for file in os.listdir(data_dir+'/test_video/'):
         if file.endswith('.pt') and \
-        'timesteps=%d-objects=%d' % (timesteps_test, num_objects_test) in file:
+        'timesteps=%d-objects=%d' % (args.timesteps, args.num_objects) in file:
             data_paths.append(os.path.join(data_dir+'test_video/', file))
     if len(data_paths) == 0:
         raise ValueError('Empty data path list.')
@@ -54,7 +52,7 @@ def rws_hmc(args):
                          num_hidden_coor, 
                          z_where_dim, 
                          z_what_dim, 
-                         num_objects_test, 
+                         args.num_objects, 
                          mean_shape, 
                          device,
                          use_markov_blanket=use_markov_blanket)
@@ -65,7 +63,7 @@ def rws_hmc(args):
             p.requires_grad = False
 
     frames = torch.load(data_paths[0])
-    apg = gibbs_sweeps(models, num_sweeps_test, timesteps_test)
+    apg = gibbs_sweeps(models, num_sweeps_test, args.timesteps)
 
     lf_step_size = 5e-5
     hmc_sampler = HMC(models['dec'], 
@@ -73,8 +71,8 @@ def rws_hmc(args):
                       shape_pixels,
                       sample_size_test, 
                       batch_size, 
-                      timesteps_test, 
-                      num_objects_test,
+                      args.timesteps, 
+                      args.num_objects,
                       z_where_dim,
                       z_what_dim,
                       args.hmc_steps,
@@ -87,7 +85,7 @@ def rws_hmc(args):
                            frames, 
                            num_sweeps_test, 
                            sample_size_test, 
-                           timesteps_test, 
+                           args.timesteps, 
                            device,
                            hmc_sampler=hmc_sampler,
                            batch_size=batch_size)
@@ -96,6 +94,8 @@ def rws_hmc(args):
 if __name___ == '__main__':
     parser.argparse.ArgumentParser('rws_hmc')
     parser.add_argument('--hmc_steps', type=int)
-    parser.add_argument('--lf_steps', typt=int)
+    parser.add_argument('--lf_steps', type=int)
+    parser.add_argument('--timesteps', type=int)
+    parser.add_argument('--num_objects', type=int)
     args = parser.parse_args()
     rws_hmc(args)
