@@ -375,6 +375,26 @@ class DecoderMarkovBlanket(Program):
 
         return {**{"z_what_%d"%(z_what_index): z_what_val, "frames": c["frames"]},
                 **{"z_where_%d_%d"%(t, ix.sweep): trace._cond_trace['z_where_%d_%d' % (t, ix.sweep)].value for t in range(min(ix.t+1, T))}}
+    
+    def hmc_log_joint(self, frames, z_wheres, z_what):
+        S, B, T, _, _ = frames.shape
+        log_p = 0.0
+        for t in range(T):
+            if t == 0:
+                log_p += Normal(loc=self.prior_where0_mu, 
+                                scale=self.prior_where0_Sigma).log_prob(z_wheres[:,:,t]).sum(-1).sum(-1)
+            else:
+                log_p += Normal(loc=z_wheres[:,:,t-1],
+                       scale=self.prior_wheret_Sigma).log_prob(z_wheres[:,:,t]).sum(-1).sum(-1)
+        log_p += Normal(loc=self.prior_what_mu,
+                        scale=self.prior_what_std).log_prob(z_what).sum(-1).sum(-1)
+        digit_mean = self.get_conv_kernel(z_what, detach=False)
+        recon_frames = torch.clamp(self.AT.digit_to_frame(digit_mean, z_wheres).sum(-3), min=0.0, max=1.0)
+        log_p += Bernoulli(probs=recon_frames).log_prob(frames).sum(-1).sum(-1).sum(-1)
+        assert log_p.shape == (S, B), 'wrong shape of log_joint.'
+        return log_p
+    
+    
 
 class DecoderFull(Program):
     """
@@ -468,3 +488,21 @@ class DecoderFull(Program):
 
         return {**{"z_what_%d"%(z_what_index): z_what_val, "frames": c["frames"]},
                 **{"z_where_%d_%d"%(t, ix.sweep): trace._cond_trace['z_where_%d_%d' % (t, ix.sweep)].value for t in range(min(ix.t+1, T))}}
+
+    def hmc_log_joint(self, frames, z_wheres, z_what):
+        S, B, T, _, _ = frames.shape
+        log_p = 0.0
+        for t in range(T):
+            if t == 0:
+                log_p += Normal(loc=self.prior_where0_mu, 
+                                scale=self.prior_where0_Sigma).log_prob(z_wheres[:,:,t]).sum(-1).sum(-1)
+            else:
+                log_p += Normal(loc=z_wheres[:,:,t-1],
+                       scale=self.prior_wheret_Sigma).log_prob(z_wheres[:,:,t]).sum(-1).sum(-1)
+        log_p += Normal(loc=self.prior_what_mu,
+                        scale=self.prior_what_std).log_prob(z_what).sum(-1).sum(-1)
+        digit_mean = self.get_conv_kernel(z_what, detach=False)
+        recon_frames = torch.clamp(self.AT.digit_to_frame(digit_mean, z_wheres).sum(-3), min=0.0, max=1.0)
+        log_p += Bernoulli(probs=recon_frames).log_prob(frames).sum(-1).sum(-1).sum(-1)
+        assert log_p.shape == (S, B), 'wrong shape of log_joint.'
+        return log_p
