@@ -23,10 +23,17 @@ def loss_apg(out, total_loss):
     # This is a hack to find the marginal of the forward kernel.
     assert out.forward_trace is not None
     forward_trace = out.forward_trace
-
     log_p = out.target_trace['recon_%d_%d'%(out.ix.t, out.ix.sweep)].log_prob.sum(-1).sum(-1)
     if len(log_p.shape) == 3:
         log_p = log_p.sum(-1)
+#     recon_log_prob = out.target_trace['recon'].log_prob
+#     T = recon_log_prob.shape[2]
+#     if out.ix.t < T and out.ix.sweep > 0:
+#         log_p = recon_log_prob[:,:,out.ix.t].sum(-1).sum(-1)
+#     elif out.ix.t == T:
+#         log_p = recon_log_prob.sum(-1).sum(-1).sum(-1)
+#     else:
+#         raise ValueError
 
     log_q = forward_trace.log_joint(**jkwargs)
     # !!! need this metric as <density>

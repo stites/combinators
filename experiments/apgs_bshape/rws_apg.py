@@ -10,7 +10,7 @@ from combinators.utils import load_models
 from experiments.apgs_bshape.hmc_sampler import HMC
 from experiments.apgs_bshape.evaluation import density_all_instances
 
-def rws_hmc(args):
+def rws_apg(args):
     use_markov_blanket = True
 
     data_dir = './dataset/'
@@ -22,10 +22,9 @@ def rws_hmc(args):
    
     num_epochs = 1000
     lr = 2e-4
-    batch_size = 4
+    batch_size = 2
     budget_train = 120
     num_sweeps_train = 5
-    num_sweeps_test = 0
 
     num_hidden_digit = 400
     num_hidden_coor = 400
@@ -33,7 +32,7 @@ def rws_hmc(args):
     z_what_dim = 10
 
     budget_test = 200
-    sample_size_test = budget_test // (num_sweeps_test + 1)
+    sample_size_test = budget_test // (args.num_sweeps + 1)
 
     device = torch.device(args.device)
     sample_size = budget_train // (num_sweeps_train + 1)
@@ -64,39 +63,26 @@ def rws_hmc(args):
             p.requires_grad = False
 
     frames = torch.load(data_paths[0])
-    apg = gibbs_sweeps(models, num_sweeps_test, args.timesteps)
+    apg = gibbs_sweeps(models, args.num_sweeps, args.timesteps)
 
-    lf_step_size = 5e-3
-    hmc_sampler = HMC(models['dec'], 
-                      frame_pixels,
-                      shape_pixels,
-                      sample_size_test, 
-                      batch_size, 
-                      args.timesteps, 
-                      args.num_objects,
-                      z_where_dim,
-                      z_what_dim,
-                      args.hmc_steps,
-                      lf_step_size,
-                      lf_step_size,
-                      args.lf_steps,
-                      device)
     log_p = density_all_instances(apg, 
                            models, 
                            frames, 
                            args.num_objects,
-                           num_sweeps_test, 
+                           args.num_sweeps, 
                            sample_size_test, 
                            args.timesteps, 
                            device,
-                           hmc_sampler=hmc_sampler,
+                           hmc_sampler=None,
                            batch_size=batch_size)
+#     print(data_paths[0])
+#     print('T=%d, K=%d, sweeps=%d, log_p=%d' % (args.timesteps, args.num_objects, args.num_sweeps, log_p))
+#     print('log_p=%d, hmc_steps=%d, lf_steps=%d' % (args.hmc_steps, args.lf_steps))
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('rws_hmc')
-    parser.add_argument('--hmc_steps', type=int)
-    parser.add_argument('--lf_steps', type=int)
+    parser.add_argument('--num_sweeps', type=int)
     parser.add_argument('--timesteps', type=int)
     parser.add_argument('--num_objects', type=int)
     parser.add_argument('--device', type=str)
     args = parser.parse_args()
-    rws_hmc(args)
+    rws_apg(args)

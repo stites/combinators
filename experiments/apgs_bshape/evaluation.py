@@ -20,8 +20,9 @@ def set_seed(seed):
     torch.backends.cudnn.benchmark = True
     
     
-def density_all_instances(apg, models, frames, num_sweeps, sample_size, timesteps, device, hmc_sampler=None, batch_size=10):
+def density_all_instances(apg, models, frames, num_objects, num_sweeps, sample_size, timesteps, device, hmc_sampler=None, batch_size=10):
     log_ps = []
+    fout = open('log_p.txt', 'a+')
     num_batches = frames.shape[0] // batch_size
     for b in tqdm(range(num_batches)):
         x = frames[b*batch_size : (b+1)*batch_size].repeat(sample_size, 1, 1, 1, 1).to(device)
@@ -29,18 +30,25 @@ def density_all_instances(apg, models, frames, num_sweeps, sample_size, timestep
         if hmc_sampler is not None and num_sweeps == 0:
             z_wheres, z_what = get_samples_for_hmc(out, timesteps)
             log_p = hmc_sampler.hmc_sampling(x, z_wheres, z_what)
-#         p_trace = Trace()
-#         for k,v in out.trace.items():
-#             if k != 'recon_%d_%d' % (timesteps-1, num_sweeps) \
-#             and k!= 'recon_opt_%d_%d' % (timesteps, num_sweeps):
-#                 p_trace.append(v, name=k)
-#         log_p = p_trace.log_joint(sample_dims=0,
-#                                     batch_dim=1,
-#                                     reparameterized=False).detach().cpu().mean()
+        else:
+            p_trace = Trace()
+            for k,v in out.trace.items():
+                if k != 'recon_%d_%d' % (timesteps-1, num_sweeps) \
+                and k!= 'recon_opt_%d_%d' % (timesteps, num_sweeps):
+                    p_trace.append(v, name=k)
+            log_p = p_trace.log_joint(sample_dims=0,
+                                        batch_dim=1,
+                                        reparameterized=False).detach().cpu().mean()
         log_ps.append(log_p)
 
         time_end = time.time()
-    return torch.tensor(log_ps).mean()
+    log_p = torch.tensor(log_ps).mean()
+    if hmc_sampler is not None and num_sweeps == 0:  
+        print('HMC, LF=%d, hmc_steps=%d, T=%d, K=%d, log_p=%d' % (hmc_sampler.hmc_num_steps, hmc_sampler.lf_num_steps, timesteps, num_objects, log_p), file=fout, flush=True)
+    else:
+        print('T=%d, K=%d, sweeps=%d, log_p=%d' % (timesteps, num_objects, num_sweeps, log_p), file=fout, flush=True)
+    fout.close()
+    return log_p
 
 def get_samples_for_hmc(out, T):
     z_what_vals = out.trace['z_what_0'].value
