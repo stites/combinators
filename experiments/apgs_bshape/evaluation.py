@@ -6,10 +6,9 @@ import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from random import shuffle
-from apgs.resampler import Resampler
-from apgs.bshape.objectives import apg_objective, bpg_objective, hmc_objective
-from apgs.bshape.hmc_sampler import HMC
-
+from combinators.stochastic import Trace
+from tqdm import trange, tqdm
+from tqdm.contrib import tenumerate
     
 def set_seed(seed):
     import torch
@@ -21,59 +20,50 @@ def set_seed(seed):
     torch.backends.cudnn.benchmark = True
     
     
-def density_all_instances(models, AT, data_paths, sample_size, K, z_where_dim, z_what_dim, num_sweeps, lf_step_size, lf_num_steps, bpg_factor, CUDA, device, batch_size=10):
-    densities = dict()
-    ess = dict()
-#     shuffle(data_paths)
-    data = torch.from_numpy(np.load(data_paths[0])).float()
-    num_batches = 5 # int(data.shape[0] / batch_size)
-    mnist_mean = torch.from_numpy(np.load('shape_mean.npy')).float()
-    mnist_mean = mnist_mean.repeat(sample_size, batch_size, K, 1, 1)
-    for b in range(num_batches):
-        print('batch=%d/%d' % (b+1, num_batches))
-        time_start = time.time()
-        x = data[b*batch_size : (b+1)*batch_size].repeat(sample_size, 1, 1, 1, 1)
-        if CUDA:
-            x = x.cuda().to(device)            
-            mnist_mean = mnist_mean.cuda().to(device)
-        S, B, T, FP, _ = x.shape
-        resampler = Resampler('systematic', S, CUDA, device)
-        resampler_bpg = Resampler('systematic', S*bpg_factor, CUDA, device)
-        result_flags = {'loss_required' : False, 'ess_required' : False, 'mode_required' : False, 'density_required' : True}
-        for lf in lf_num_steps:
-            hmc_sampler = HMC(models, AT, S, B, T, K, z_where_dim, z_what_dim, num_sweeps, lf_step_size, lf_step_size, lf, CUDA, device)
-            trace_hmc = hmc_objective(models, AT, x, result_flags, hmc_sampler, mnist_mean) 
-            if 'HMC-RWS(L=%d, LF=%d)' % (S, lf) in densities:
-                densities['HMC-RWS(L=%d, K=%d, LF=%d)' % (S, num_sweeps, lf)].append(trace_hmc['density'][-1].mean(-1).mean(-1).cpu().numpy())
-#                 ess['HMC-RWS(L=%d, K=%d, LF=%d)' % (S, K, lf)].append(trace_hmc['ess'][-1].mean(-1).cpu().numpy())
-            else:
-                densities['HMC-RWS(L=%d, K=%d, LF=%d)' % (S, num_sweeps, lf)] = [trace_hmc['density'][-1].mean(-1).mean(-1).cpu().numpy()]
-#                 ess['HMC-RWS(L=%d, K=%d, LF=%d)' % (S, K, lf)] = [trace_hmc['ess'][-1].mean(-1).cpu().numpy()]
-                
-#         x_bpg = x.repeat(bpg_factor, 1, 1, 1, 1)
-#         mnist_mean_bpg = mnist_mean.repeat(bpg_factor, 1, 1, 1, 1)
-#         trace_bpg = bpg_objective(models, AT, x_bpg, result_flags, num_sweeps, resampler_bpg, mnist_mean_bpg)
-#         if 'BPG(L=%d)' % (S*bpg_factor) in densities:
-#             densities['BPG(L=%d)' % (S*bpg_factor)].append(trace_bpg['density'].mean(-1).mean(-1).cpu().numpy()[-1])
-#         else:
-#             densities['BPG(L=%d)' % (S*bpg_factor)] = [trace_bpg['density'].mean(-1).mean(-1).cpu().numpy()[-1]]
-#             ess['BPG(L=%d)' % (S*bpg_factor)] = [trace_apg['ess'][-1].mean(-1).cpu().numpy()]
-#         trace_apg = apg_objective(models, AT, x, K, result_flags, num_sweeps, resampler, mnist_mean)
-#         if 'APG(L=%d, K=%d)' % (S, num_sweeps) in densities:
-#             densities['APG(L=%d, K=%d)' % (S, num_sweeps)].append(trace_apg['density'][-1].mean(-1).mean(-1).cpu().numpy())
-#             ess['APG(L=%d, K=%d)' % (S, num_sweeps)].append(trace_apg['ess'][-1].mean(-1).cpu().numpy())
-#         else:
-#             densities['APG(L=%d, K=%d)' % (S, num_sweeps)] = [trace_apg['density'][-1].mean(-1).mean(-1).cpu().numpy()]
-#             ess['APG(L=%d, K=%d)' % (S, num_sweeps)] = [trace_apg['ess'][-1].mean(-1).cpu().numpy()]
+def density_all_instances(apg, models, frames, num_sweeps, sample_size, timesteps, device, hmc_sampler=None, batch_size=10):
+    log_ps = []
+    num_batches = frames.shape[0] // batch_size
+    for b in tqdm(range(num_batches)):
+        x = frames[b*batch_size : (b+1)*batch_size].repeat(sample_size, 1, 1, 1, 1).to(device)
+        out = apg(c={'frames': x}, sample_dims=0, batch_dim=1, reparameterized=False)
+        if hmc_sampler is not None and num_sweeps == 0:
+            z_wheres, z_what = get_samples_for_hmc(out, timesteps)
+            log_p = hmc_sampler.hmc_sampling(x, z_wheres, z_what)
+#         p_trace = Trace()
+#         for k,v in out.trace.items():
+#             if k != 'recon_%d_%d' % (timesteps-1, num_sweeps) \
+#             and k!= 'recon_opt_%d_%d' % (timesteps, num_sweeps):
+#                 p_trace.append(v, name=k)
+#         log_p = p_trace.log_joint(sample_dims=0,
+#                                     batch_dim=1,
+#                                     reparameterized=False).detach().cpu().mean()
+        log_ps.append(log_p)
+
         time_end = time.time()
-        print('%d / %d completed in (%ds)' % (b+1, num_batches, time_end-time_start))
-    for key in densities.keys():
-        densities[key] = np.array(densities[key]).mean()
-#         ess[key] =np.array(ess[key]).mean()
-        print('method=%s, log joint=%.2f' % (key, densities[key]))
+    return torch.tensor(log_ps).mean()
+
+def get_samples_for_hmc(out, T):
+    z_what_vals = out.trace['z_what_0'].value
+    z_where_vals = []
+    for t in range(T):
+        z_where_vals.append(out.trace['z_where_%d_0'%(t)].value.unsqueeze(2))
+    z_where_vals = torch.cat(z_where_vals, 2)
+    return z_where_vals.detach(), z_what_vals.detach()
 
 
-def viz_samples(frames, rs, ws, num_sweeps, num_objects, object_size, fs=1, title_fontsize=12, lw=2, colors=['#AA3377', '#EE7733', '#009988', '#0077BB', '#BBBBBB', '#EE3377', '#DDCC77'], save=False):
+# def get_samples(out, sweeps, T):
+# #     recon_k = filter(lambda k: 'recon' in k.split("_") and 'opt' not in k.split("_"), out.trace.keys())
+# #     recon_key = next(recon_k)
+#     recon_key = 'recon_%d_%d' % (T, sweeps)
+#     recon_vals = out.trace[recon_key].dist.probs
+#     z_what_vals = out.trace[recon_key].value
+#     z_where_vals = []
+#     for t in range(T):
+#         z_where_vals.append(out.trace['z_where_%d_%d'%(t,sweeps)].value.unsqueeze(2))
+#     z_where_vals = torch.cat(z_where_vals, 2)
+#     return (recon_vals.detach().cpu(), z_where_vals.detach().cpu()), z_what_vals
+
+def viz_samples(frames, rs, ws, num_sweeps, num_objects, object_size, fs=1, title_fontsize=12, lw=3, colors=['#AA3377', '#EE7733', '#009988', '#0077BB', '#BBBBBB', '#EE3377', '#DDCC77'], save=False):
     B, T, FP, _ = frames.shape
 #     recons_first = rs[0]
 #     z_wheres_first = ws[0].clone()

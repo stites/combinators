@@ -18,7 +18,7 @@ def rws_hmc(args):
     shape_pixels = 28
     num_objects_train = 3
 
-    device = 'cuda:1'
+   
     num_epochs = 1000
     lr = 2e-4
     batch_size = 4
@@ -34,7 +34,7 @@ def rws_hmc(args):
     budget_test = 200
     sample_size_test = budget_test // (num_sweeps_test + 1)
 
-    device = torch.device(device)
+    device = torch.device(args.device)
     sample_size = budget_train // (num_sweeps_train + 1)
     assert sample_size > 0, 'non-positive sample size =%d' % sample_size
     mean_shape = torch.load(data_dir + 'mean_shape.pt').to(device)    
@@ -97,5 +97,6 @@ if __name___ == '__main__':
     parser.add_argument('--lf_steps', type=int)
     parser.add_argument('--timesteps', type=int)
     parser.add_argument('--num_objects', type=int)
+    parser.add_argument('--device', type=str)
     args = parser.parse_args()
     rws_hmc(args)
