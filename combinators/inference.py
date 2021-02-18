@@ -125,7 +125,8 @@ class Resample(Inf):
         Inf.__init__(self, ix=ix, _debug=_debug, loss0=loss0)
         self.q = q
         self.strategy = rstrat.Systematic(quiet=quiet, normalize_weights=normalize_weights)
-        
+        self.normalize_weights = normalize_weights
+
     def __call__(self, c, sample_dims=None, batch_dim=None, _debug=False, reparameterized=True, ix=None, **shared_kwargs) -> Out:
         """ Resample """
         shape_kwargs = dict(sample_dims=sample_dims, batch_dim=batch_dim, reparameterized=reparameterized)
@@ -265,6 +266,7 @@ class Compose(Inf):
         return self._out
 
 
+
 class Propose(Inf):
     def __init__(self,
             p: Union[Program, Extend],
@@ -273,11 +275,13 @@ class Propose(Inf):
             loss0=None,
             device=None,
             ix=None,
-            _debug:bool=False):
+            _debug:bool=False,
+            _no_reruns:bool=True):
         Inf.__init__(self, loss_fn=loss_fn, loss0=loss0, device=device, ix=ix, _debug=_debug)
         assert not isinstance(p, Compose)
         self.p = p
         self.q = q
+        self._no_reruns = _no_reruns
 
     def __call__(self, c, sample_dims=None, batch_dim=None, _debug=False, reparameterized=True, ix=None, **shared_kwargs) -> Out:
         """ Propose """
@@ -288,7 +292,6 @@ class Propose(Inf):
         q_out = dispatch(self.q)(c, **inf_kwargs, **shared_kwargs)
 
         p_condition = Condition(self.p, q_out.trace)
-
         p_out = dispatch(p_condition)(c, **inf_kwargs,  **shared_kwargs)
 
         rho_1 = set(q_out.trace.keys())
@@ -296,7 +299,6 @@ class Propose(Inf):
         tau_2 = set({k for k, v in p_out.trace.items() if v.provenance != Provenance.OBSERVED})
         nodes = rho_1 - (tau_1 - tau_2)
         lu_1 = q_out.trace.log_joint(nodes=nodes, **shape_kwargs)
-        
         # τ*, by definition, can't have OBSERVE or REUSED random variables
         # FIXME: precision errors when converting python into pytorch, see tests.
         lu_star = 0.0 if 'trace_star' not in p_out else q_out.trace.log_joint(nodes=set(p_out.trace_star.keys()), **shape_kwargs)
@@ -306,19 +308,27 @@ class Propose(Inf):
         # In the semantics this corresponds to lw_2 - (lu + [lu_star])
         lv = p_out.log_weight - (lu_1 + lu_star)
         lw_out = lw_1 + lv
-       
-        # FIXME: dirty optimization hack
-        forward_trace = None 
-        if q_out.type == "Compose":
-            if q_out.q1_out.type in ['Resample', "Propose"]:
-                forward_trace = q_out.q2_out.trace
-            else:
-                forward_trace = q_out.q2_out.trace
-                
+
+        # =============================================== #
+        # detach c                                        #
+        # =============================================== #
+        new_out = None
+        if isinstance(p_out.output, torch.Tensor):
+            new_out = p_out.output.detach()
+        elif isinstance(p_out.output, dict):
+            new_out = {}
+            for k, v in p_out.output.items():
+                if isinstance(v, torch.Tensor):
+                    new_out[k] = v.detach()
+                else:
+                    new_out[k] = v
+        else:
+            new_out = p_out.output
+
         self._out = Out(
-            trace=rerun_with_detached_values(p_out.trace),
+            trace=p_out.trace if self._no_reruns else rerun_with_detached_values(p_out.trace),
             log_weight=lw_out.detach(),
-            output=p_out.output,
+            output=new_out,
             extras=dict(
                 # FIXME: Delete before publishing - this is for debugging only
                 lu=(lu_1 + lu_star),
@@ -332,17 +342,15 @@ class Propose(Inf):
                 ess = effective_sample_size(lw_out, sample_dims=sample_dims),
                 ## objectives api ##
                 lv=lv,
-                proposal_trace=q_out.trace,
+                proposal_trace=copytraces(q_out.trace, exclude_node=set(q_out.trace.keys()) - nodes),
                 target_trace=copytraces(p_out.trace, p_out.trace_star) if "trace_star" in p_out else p_out.trace,
-                forward_trace=forward_trace,
-                # ## apg ##
+                ## apg ##
+                forward_trace = q_out.q2_out.trace if q_out.type == "Compose" else None,
                 # p_num=p_out.p_out.log_weight if (p_out.type == "Extend") else p_out.log_weight,
                 # q_den=lu_star,
                 #########
 #                 trace_original=p_out.trace,
                 # FIXME: if we hold on to these references then we might introduce a space leak
-                # q_out=q_out,
-                # p_out=p_out,
                 type=type(self).__name__,
                 pytype=type(self),
                 # FIXME: can we ditch this? how important is this for objectives
@@ -351,4 +359,9 @@ class Propose(Inf):
                 ),
         )
         self._out['loss'] = self.foldr_loss(self._out, maybe(q_out, 'loss', self.loss0))
+
+        if self._debug or _debug:
+            self._out['q_out'] = q_out
+            self._out['p_out'] = p_out
+
         return self._out
