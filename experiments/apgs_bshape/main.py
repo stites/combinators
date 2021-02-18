@@ -11,11 +11,11 @@ from combinators import ImproperRandomVariable, RandomVariable, Trace, Program, 
 from combinators import trace_utils, adam, ppr, autodevice, kw_autodevice, nvo_rkl, nvo_avo, effective_sample_size, log_Z_hat
 from combinators.utils import save_models
 
-from experiments.apgs_bshape.gibbs_1frame import gibbs_sweeps
-from experiments.apgs_bshape.models_1frame import init_models
+# from experiments.apgs_bshape.gibbs_1frame import gibbs_sweeps
+# from experiments.apgs_bshape.models_1frame import init_models
 
-# from experiments.apgs_bshape.gibbs import gibbs_sweeps
-# from experiments.apgs_bshape.models import init_models
+from experiments.apgs_bshape.gibbs import gibbs_sweeps
+from experiments.apgs_bshape.models import init_models
 
 if debug.runtime() == 'jupyter':
     from tqdm.notebook import trange, tqdm

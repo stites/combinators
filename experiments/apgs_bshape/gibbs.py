@@ -66,7 +66,8 @@ def gibbs_sweeps(models, num_sweeps, T):
 
     q_is = Propose(p=p_dec_os, q=q_os, ix=apg_ix(T, 0, "forward"),
                    loss_fn=loss_is)
-    q_is = Resample(q_is, quiet=True, normalize_weights=True)
+    if num_sweeps !=0:
+        q_is = Resample(q_is, quiet=True, normalize_weights=True)
 
     q_t = q_is
     for sweep in range(1, num_sweeps+1): # Sweeps

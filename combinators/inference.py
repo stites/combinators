@@ -242,9 +242,10 @@ class Compose(Inf):
         inf_kwargs = dict(_debug=_debug, ix=ix, **shape_kwargs)
 
         q1_out = dispatch(self.q1)(c, **inf_kwargs, **shared_kwargs)
-
-        q2_out = dispatch(self.q2)(q1_out.output, **inf_kwargs, **shared_kwargs)
-
+        try:
+            q2_out = dispatch(self.q2)(q1_out.output, **inf_kwargs, **shared_kwargs)
+        except:
+            breakpoint()
         assert len(set(q2_out.trace.keys()).intersection(set(q1_out.trace.keys()))) == 0, "addresses must not overlap"
 
         self._out = Out(
