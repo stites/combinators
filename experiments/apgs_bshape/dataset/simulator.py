@@ -91,11 +91,11 @@ class Sim_BShape():
         Xs = []
         Vs = []
         x0 = Uniform(-1, 1).sample((num_tjs, 2))
-        a2 = 0.5
-        while(True):
-            if ((x0[0] - x0[1])**2).sum() > a2 and ((x0[2] - x0[1])**2).sum() > a2 and ((x0[0] - x0[2])**2).sum() > a2:
-                break
-            x0 = Uniform(-1, 1).sample((num_tjs, 2))
+#         a2 = 0.5
+#         while(True):
+#             if ((x0[0] - x0[1])**2).sum() > a2 and ((x0[2] - x0[1])**2).sum() > a2 and ((x0[0] - x0[2])**2).sum() > a2:
+#                 break
+#             x0 = Uniform(-1, 1).sample((num_tjs, 2))
         for i in range(num_tjs):
             x, v = self.sim_trajectory(init_xs=x0[i])
             Xs.append(x.unsqueeze(0))
@@ -120,8 +120,6 @@ class Sim_BShape():
             Thetas = torch.cat((S, Xs[k].unsqueeze(-1) * t_factor), -1)
             grid = affine_grid(Thetas, torch.Size((self.timesteps, 1, self.frame_size, self.frame_size)), align_corners=False)
             bshape.append(grid_sample(object_k.repeat(self.timesteps, 1, 1).unsqueeze(1), grid, mode='nearest', align_corners=False))
-            # TJ.append(Xs[n].unsqueeze(0))
-            # Init_V.append(V[0.unsqueeze()])
         bshape = torch.cat(bshape, 1).sum(1).clamp(min=0.0, max=1.0)
         return bshape
     
