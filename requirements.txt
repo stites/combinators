@@ -16,3 +16,6 @@ tensorboard
 
 # visualization
 matplotlib
+
+# pyro
+pyro-ppl
