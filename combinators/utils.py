@@ -122,7 +122,7 @@ def runtime() -> str:
 
 
 @typechecked
-def seed(s=42):
+def seed(s:int=42)->None:
     torch.manual_seed(s)
     np.random.seed(s)
     random.seed(s)
