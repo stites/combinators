@@ -52,6 +52,7 @@
             gnused
             watchexec
             rsync
+            cucumber
           ];
           # applying patch: https://github.com/microsoft/pyright/issues/565
           bash.extra = ''
