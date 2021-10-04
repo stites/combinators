@@ -47,13 +47,13 @@ class WithSubstitution(Messenger):
         pretty much taken from ReplayMessenger with some subtle differences:
         - if the substitutee program is observing a random variable, we still
           want to perform substitution
+        - if the substituter program has observed a random variable, we also
+          want to perform substitution
         - a substituted variable is flagged as such.
         """
         name = msg["name"]
         if self.trace is not None and name in self.trace:
             guide_msg = self.trace.nodes[name]
-            if guide_msg["type"] != "sample" or guide_msg["is_observed"]:
-                raise RuntimeError("site {} must be sampled in trace".format(name))
             msg["done"] = True
             msg["value"] = guide_msg["value"]
             msg["infer"] = guide_msg["infer"]

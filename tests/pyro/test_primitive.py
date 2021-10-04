@@ -13,6 +13,7 @@ from pyro.poutine.trace_messenger import (
 )
 from pyro.poutine.messenger import Messenger
 
+import torch
 import pytest
 import pyro
 import pyro.distributions as dist
@@ -99,3 +100,25 @@ def test_with_substitution(model0):
 
     assert p_out.output == q_out.output
     assert q_out.log_weight != 0.
+
+# import tests from test_inference.py
+def test_run_a_primitive_program(simple1):
+    s1_out = primitive(simple1)()
+    assert set(s1_out.trace.nodes.keys()) == {"z_1", "z_2", "x_1", "x_2"}
+    assert s1_out.log_weight == s1_out.trace.log_prob_sum(site_filter=lambda name, _: name in {"x_1", "x_2"})
+
+def test_simple_substitution(simple1, simple2):
+    s1, s2 = primitive(simple1), primitive(simple2)
+    s1_out = s1()
+    s2_out = with_substitution(s2, trace=s1_out.trace)()
+
+    rho_f_addrs = {"x_2", "x_3", "z_2", "z_3"}
+    tau_f_addrs = {"z_2", "z_3"}
+    tau_p_addrs = {"z_1", "z_2"}
+    nodes = rho_f_addrs - (tau_f_addrs - tau_p_addrs)
+    lw_out = s2_out.trace.log_prob_sum(site_filter=lambda name, _: name in nodes)
+
+    assert (lw_out == s2_out.log_weight).all()
+    assert (
+        len(set({"z_1", "x_1"}).intersection(set(s2_out.trace.nodes.keys()))) == 0
+    )
