@@ -70,14 +70,29 @@ def get_marginal(trace: Trace) -> Trace:
     return concat_traces(trace, site_filter=lambda _, n: not is_auxiliary(n))
 
 
-@typechecked
-class inference:  # Callable[..., Out]
+class inference(object):
     pass
 
 
+Inference = Union[inference, Callable[..., Out]]
+
+
+class targets(inference):
+    pass
+
+
+Targets = Union[targets, Callable[..., Out]]
+
+
+class proposals(inference):
+    pass
+
+
+Proposals = Union[proposals, Callable[..., Out]]
+
 # FIXME evaluation in context of loss
 @typechecked
-class primitive(inference):
+class primitive(targets, proposals):
     def __init__(self, program: Callable[..., Any]):
         self.program = program
 
@@ -91,27 +106,24 @@ class primitive(inference):
             return Out(output=out, log_weight=lp, trace=tr)
 
 
-class targets(inference):
-    def __call__(self, *args, **kwargs) -> Out:
-        ...
+Primitive = Union[Callable[..., Out], primitive]
 
 
+@typechecked
 class extend(targets):
-    def __init__(self, p: Union[primitive, targets], f: Union[primitive, targets]):
+    def __init__(self, p: Targets, f: Primitive):
         self.p, self.f = p, f
 
     def __call__(self, *args, **kwargs) -> Out:
         p_out: Out = self.p(*args, **kwargs)
-
         f_out: Out = auxiliary(self.f)(p_out.output, *args, **kwargs)
-
         p_trace, f_trace = p_out.trace, f_out.trace
 
         under_substitution = any(
             map(is_substituted, [*p_trace.nodes.values(), *f_trace.nodes.values()])
         )
 
-        assert_no_overlap(p_out.trace, f_out.trace, location=type(self))
+        assert_no_overlap(p_trace, f_trace, location=type(self))
         assert all(map(not_observed, f_trace.nodes.values()))
         if not under_substitution:
             assert f_out.log_weight == 0.0
@@ -126,55 +138,36 @@ class extend(targets):
         )
 
 
-# FIXME
-class proposals(inference):
-    def __call__(self, *args, **kwargs) -> Out:
-        ...
-
-
 @typechecked
-class compose(inference):
-    def __init__(
-        self, q2: Union[primitive, proposals], q1: Union[primitive, proposals]
-    ) -> None:
+class compose(proposals):
+    def __init__(self, q2: Proposals, q1: Proposals):
         self.q1, self.q2 = q1, q2
-        self.substitution_trace
 
     def __call__(self, *args, **kwargs) -> Out:
         q1_out = self.q1(*args, **kwargs)
         q2_out = self.q2(*args, **kwargs)
-        out_trace = concat_traces(q2_out.trace, q1_out.trace)
         assert_no_overlap(q2_out.trace, q1_out.trace, location=type(self))
 
         return Out(
-            trace=out_trace,
+            trace=concat_traces(q2_out.trace, q1_out.trace),
             log_weight=q1_out.log_weight + q2_out.log_weight,
             output=q2_out.output,
         )
 
 
 @typechecked
-class propose(inference):
+class propose(proposals):
     def __init__(
-        self, p: Union[primitive, extend], q: inference, loss_fn=(lambda x, fin: fin)
+        self,
+        p: Targets,
+        q: Proposals,
+        loss_fn: Callable[[Out, Tensor], Tensor] = (lambda x, fin: fin),
     ):
         self.p, self.q = p, q
 
-    # @classmethod
-    # def marginalize(cls, p, p_out):
-    #     if isinstance(p, extend):
-    #         assert "marginal_keys" in p_out
-    #         return p_out.marginal_out, concat_traces(
-    #             p_out.trace, site_filter=lambda name, _: name not in (set(p_out.trace.keys()) - p_out.marginal_keys)
-    #         )
-    #     else:
-    #         return p_out.output, p_out.trace
-
     def __call__(self, *args, **kwargs) -> Out:
         q_out = self.q(*args, **kwargs)
-
-        with WithSubstitution(self.p, q_out.trace), MarginalizeMessenger() as marg:
-            p_out = self.p(*args, **kwargs)
+        p_out = with_substitution(self.p, trace=q_out.trace)(*args, **kwargs)
 
         rho_1 = set(q_out.trace.nodes.keys())
         tau_filter = _and(not_observed, is_random_variable)
@@ -192,8 +185,8 @@ class propose(inference):
         lv = p_out.log_weight - lu_1
         lw_out = lw_1 + lv
 
-        m_trace = marg.get_marginal()  # equivalent of tracer.get_trace()
-        m_output = m_trace["_RETURN"]
+        m_trace = get_marginal(p_out)
+        m_output = m_trace["_RETURN"]  # FIXME, not accounted for
 
         return Out(
             # FIXME local gradient computations
