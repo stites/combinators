@@ -54,6 +54,10 @@ class WithSubstitutionMessenger(Messenger):
         name = msg["name"]
         if self.trace is not None and name in self.trace:
             guide_msg = self.trace.nodes[name]
+            if msg["is_observed"]:
+                return None
+            if guide_msg["type"] != "sample" or guide_msg["is_observed"]:
+                raise RuntimeError("site {} must be sampled in trace".format(name))
             msg["done"] = True
             msg["value"] = guide_msg["value"]
             msg["infer"] = guide_msg["infer"]
