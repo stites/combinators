@@ -26,6 +26,7 @@ from combinators.pyro.traces import (
     is_observed,
     is_auxiliary,
     not_observed,
+    not_substituted,
     _and, _not, _or,
 )
 
@@ -79,10 +80,12 @@ class primitive(inference):
             tr: Trace = tracer.trace
 
             rho_addrs = {k for k in tr.nodes.keys()}
-            tau_addrs = {k for k, rv in tr.nodes.items() if not_observed(rv)}
 
-            tau_prime_addrs = {k for k, rv in tr.nodes.items()
-                               if _and(is_substituted, not_observed)(rv)}
+            all_tau = [(k, rv) for k, rv in tr.nodes.items() if not_substituted(rv)]
+            all_tau_prime = [(k, rv) for k, rv in tr.nodes.items() if is_substituted(rv)]
+
+            tau_addrs = {k for k, rv in all_tau if not_observed(rv)}
+            tau_prime_addrs = {k for k, rv in all_tau_prime if not_observed(rv)}
 
             lp = tr.log_prob_sum(site_filter=lambda name, _: name in rho_addrs - (
                 tau_addrs - tau_prime_addrs

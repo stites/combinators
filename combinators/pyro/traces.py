@@ -58,6 +58,10 @@ is_substituted = _check_infer_map('substituted')
 is_auxiliary = _check_infer_map('is_auxiliary')
 
 @typechecked
+def not_substituted(node: Node) -> bool:
+    return not is_substituted(node)
+
+@typechecked
 def is_random_variable(node: Node) -> bool:
     # FIXME as opposed to "is improper random variable"
     raise NotImplementedError()
