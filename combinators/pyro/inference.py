@@ -35,34 +35,11 @@ class Out(NamedTuple):
     log_weight: Tensor
     trace: Trace
 
-class WithSubstitutionMessenger(Messenger):
-    def __init__(self,
-                 # program,
-                 trace: Optional[Trace] = None) -> None:
-        super().__init__()
-        self.trace = trace
-
+class WithSubstitutionMessenger(ReplayMessenger):
     def _pyro_sample(self, msg):
-        """
-        pretty much taken from ReplayMessenger with some subtle differences:
-        - if the substitutee program is observing a random variable, we still
-          want to perform substitution
-        - if the substituter program has observed a random variable, we also
-          want to perform substitution
-        - a substituted variable is flagged as such.
-        """
-        name = msg["name"]
-        if self.trace is not None and name in self.trace:
-            guide_msg = self.trace.nodes[name]
-            if msg["is_observed"]:
-                return None
-            if guide_msg["type"] != "sample" or guide_msg["is_observed"]:
-                raise RuntimeError("site {} must be sampled in trace".format(name))
-            msg["done"] = True
-            msg["value"] = guide_msg["value"]
-            msg["infer"] = guide_msg["infer"]
+        super()._pyro_sample(msg)
+        if self.trace is not None and msg["name"] in self.trace and not msg["is_observed"]:
             msg["infer"]['substituted'] = True
-        return None
 
 _handler_name, _handler = _make_handler(WithSubstitutionMessenger)
 _handler.__module__ = __name__
