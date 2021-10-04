@@ -8,24 +8,24 @@ Feature: Primitive Combinator
 
     Then I get a primitive inference combinator
 
-#  Scenario: Traced evaluation
-#    Given a primitive inference combinator
-#    When I evaluate it with the appropriate arguments
-#
-#    Then I get the original model outputs
-#    And a trace (which includes the a density map and sampled values)
-#    And a likelihood weight of 1
-#
-#  Scenario: Traced evaluation under substitution with no overlaps
-#    Given a primitive inference combinator
-#    And a second primitive inference combinator
-#    And the second primitive has no overlapping addresses
-#    And the second primitive is used as a substitution context
-#
-#    Then I get the original model outputs
-#    And a trace (which includes the a density map and sampled values)
-#    And a likelihood weight of 1
-#
+  Scenario: Traced evaluation
+    Given a primitive inference combinator
+    When I evaluate it with the appropriate arguments
+
+    Then I get the original model outputs
+    And a trace with a density map and sampled values
+    And a log likelihood weight of 0
+
+  Scenario: Traced evaluation under substitution with no overlaps
+    Given a primitive inference combinator
+    Given a second primitive inference combinator
+    When the second primitive has no overlapping addresses
+    #And the second primitive is used as a substitution context
+    #
+    #Then I get the original model outputs
+    #And a trace (which includes the a density map and sampled values)
+    #And a likelihood weight of 1
+
 #  Scenario: Traced evaluation under substitution with overlaps
 #    Given a primitive inference combinator
 #    And a second primitive inference combinator
