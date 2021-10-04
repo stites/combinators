@@ -15,15 +15,18 @@ from pyro.poutine.messenger import Messenger
 from pyro.poutine.handlers import _make_handler
 
 from combinators.pyro.traces import (
-    concat_traces, assert_no_overlap,
+    concat_traces,
+    assert_no_overlap,
     is_substituted,
     is_observed,
     is_auxiliary,
     not_observed,
     not_substituted,
     node_filter,
-    _and, _or,
+    _and,
+    _or,
 )
+
 
 @typechecked
 class Out(NamedTuple):
@@ -31,23 +34,31 @@ class Out(NamedTuple):
     log_weight: Tensor
     trace: Trace
 
+
 class WithSubstitutionMessenger(ReplayMessenger):
     def _pyro_sample(self, msg):
         super()._pyro_sample(msg)
-        if self.trace is not None and msg["name"] in self.trace and not msg["is_observed"]:
-            msg["infer"]['substituted'] = True
+        if (
+            self.trace is not None
+            and msg["name"] in self.trace
+            and not msg["is_observed"]
+        ):
+            msg["infer"]["substituted"] = True
+
 
 _handler_name, _handler = _make_handler(WithSubstitutionMessenger)
 _handler.__module__ = __name__
 locals()[_handler_name] = _handler
+
 
 class AuxiliaryMessenger(Messenger):
     def __init__(self) -> None:
         super().__init__()
 
     def _pyro_sample(self, msg):
-        msg['infer']['is_auxiliary'] = True
+        msg["infer"]["is_auxiliary"] = True
         return None
+
 
 _handler_name, _handler = _make_handler(AuxiliaryMessenger)
 _handler.__module__ = __name__
@@ -55,8 +66,9 @@ locals()[_handler_name] = _handler
 
 
 @typechecked
-def get_marginal(trace:Trace)->Trace:
+def get_marginal(trace: Trace) -> Trace:
     return concat_traces(trace, site_filter=lambda _, n: not is_auxiliary(n))
+
 
 @typechecked
 class inference:  # Callable[..., Out]
@@ -120,8 +132,6 @@ class proposals(inference):
         ...
 
 
-#@typechecked
-
 @typechecked
 class compose(inference):
     def __init__(
@@ -182,7 +192,7 @@ class propose(inference):
         lv = p_out.log_weight - lu_1
         lw_out = lw_1 + lv
 
-        m_trace = marg.get_marginal() # equivalent of tracer.get_trace()
+        m_trace = marg.get_marginal()  # equivalent of tracer.get_trace()
         m_output = m_trace["_RETURN"]
 
         return Out(
