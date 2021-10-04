@@ -1,22 +1,16 @@
 from torch import Tensor, tensor
 from typing import Any, Callable
 from typeguard import typechecked
-from pyro import poutine
 from pyro.poutine import Trace
 from pyro.poutine.trace_messenger import TraceMessenger
 from pyro.poutine.messenger import Messenger
 from typing import NamedTuple
 from torch import Tensor, tensor
-from typing import NamedTuple, Any, Callable, Union, Optional, Tuple
+from typing import NamedTuple, Any, Callable, Union
 from typeguard import typechecked
-from pyro import poutine
 from pyro.poutine import Trace
 from pyro.poutine.replay_messenger import ReplayMessenger
-from pyro.poutine.trace_messenger import (
-    TraceMessenger,
-    TraceHandler,
-    identify_dense_edges,
-)
+from pyro.poutine.trace_messenger import TraceMessenger
 from pyro.poutine.messenger import Messenger
 from pyro.poutine.handlers import _make_handler
 
@@ -27,7 +21,8 @@ from combinators.pyro.traces import (
     is_auxiliary,
     not_observed,
     not_substituted,
-    _and, _not, _or,
+    node_filter,
+    _and, _or,
 )
 
 @typechecked
@@ -79,21 +74,7 @@ class primitive(inference):
             out = self.program(*args, **kwargs)
             tr: Trace = tracer.trace
 
-            # rho_addrs = {k for k in tr.nodes.keys()}
-            # all_tau = [(k, rv) for k, rv in tr.nodes.items() if not_substituted(rv)]
-            # all_tau_prime = [(k, rv) for k, rv in tr.nodes.items() if is_substituted(rv)]
-            # tau_addrs = {k for k, rv in all_tau if not_observed(rv)}
-            # tau_prime_addrs = {k for k, rv in all_tau_prime if not_observed(rv)}
-            # nodes = rho_addrs - (tau_addrs - tau_prime_addrs)
-            # lp = tr.log_prob_sum(site_filter=lambda name, _: name in nodes)
-
-            # all_addrs = {k for k in tr.nodes.keys()}
-            # sampled_addrs = {k for k, rv in tr.nodes.items() if not_substituted(rv) and not_observed(rv)}
-            # reused_addrs = {k for k, rv in tr.nodes.items() if is_substituted(rv) and not_observed(rv)}
-            # observed_or_reused = all_addrs - (sampled_addrs - reused_addrs)
-            # lp = tr.log_prob_sum(site_filter=lambda name, _: name in observed_or_reused)
-
-            lp = tr.log_prob_sum(site_filter=lambda _, rv: is_substituted(rv) or is_observed(rv))
+            lp = tr.log_prob_sum(node_filter(_or(is_substituted, is_observed)))
             lp = lp if isinstance(lp, Tensor) else tensor(lp)
             return Out(output=out, log_weight=lp, trace=tr)
 
@@ -112,29 +93,23 @@ class extend(targets):
 
         f_out: Out = auxiliary(self.f)(p_out.output, *args, **kwargs)
 
-        p_nodes, f_nodes = p_out.trace.nodes, f_out.trace.nodes
+        p_trace, f_trace = p_out.trace, f_out.trace
 
         under_substitution = any(
-            [is_substituted(n) for _, n in {**p_nodes, **f_nodes}.items()]
+            map(is_substituted, [*p_trace.nodes.values(), *f_trace.nodes.values()])
         )
 
+        assert_no_overlap(p_out.trace, f_out.trace, location=type(self))
+        assert all(map(not_observed, f_trace.nodes.values()))
         if not under_substitution:
             assert f_out.log_weight == 0.0
-            node_is_not = _or(is_observed, is_substituted)
-        else:
-            node_is_not = is_observed
+            assert all(map(not_substituted, f_trace.nodes.values()))
 
-        assert len({k for k, n in f_nodes.items() if node_is_not(n)}) == 0
-
-        assert (
-            len(set(f_nodes.keys()).intersection(set(p_nodes.keys()))) == 0
-        ), f"{type(self)}: addresses must not overlap"
-
-        log_u2 = f_out.trace.log_prob_sum(site_filter=lambda _, n: not_observed(n)) # nothing observed, checked above!
+        log_u2 = f_trace.log_prob_sum()
 
         return Out(
             trace=concat_traces(p_out.trace, f_out.trace),
-            log_weight=p_out.log_weight + log_u2,  # $w_1 \cdot u_2$
+            log_weight=p_out.log_weight + log_u2,
             output=f_out.output,
         )
 

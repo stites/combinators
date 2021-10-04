@@ -1,5 +1,4 @@
-from torch import Tensor, tensor
-from typing import Any, Callable, OrderedDict
+from typing import Any, Callable, TypeVar
 from typeguard import typechecked
 from pyro import poutine
 from pyro.poutine import Trace
@@ -13,7 +12,9 @@ from pyro.poutine import Trace
 
 # type aliases
 Node = dict
+T = TypeVar("T")
 Predicate = Callable[[Any], bool]
+SiteFilter = Callable[[str, Node], bool]
 
 def true(*args, **kwargs):
     return True
@@ -36,9 +37,10 @@ def concat_traces(
     return newtrace
 
 
-def assert_no_overlap(t0, t1, location=""):
+@typechecked
+def assert_no_overlap(t0:Trace, t1:Trace, location=""):
     assert (
-        len(set(t0.keys()).intersection(set(t1.keys()))) == 0
+        len(set(t0.nodes.keys()).intersection(set(t1.nodes.keys()))) == 0
     ), f"{location}: addresses must not overlap"
 
 @typechecked
@@ -82,16 +84,10 @@ def _or(p0:Predicate, p1:Predicate)->Predicate:
 def _not(p:Predicate)->Predicate:
     return lambda x: not p(x)
 
-# FIXME: I think not using these will cause a bug
-class provenance:
-    @staticmethod
-    def observed(cls, node):
-        return is_observed(node) and not is_substituted(node)
+@typechecked
+def node_filter(p:Callable[[Node], bool])->SiteFilter:
+    return lambda _, node: p(node)
 
-    @staticmethod
-    def substituted(cls, node):
-        return is_substituted(node)
-
-    @staticmethod
-    def sampled(cls, node):
-        return not (is_observed(node) or is_substituted(node))
+@typechecked
+def addr_filter(p:Callable[[str], bool])->SiteFilter:
+    return lambda name, _: p(name)
