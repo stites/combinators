@@ -79,17 +79,21 @@ class primitive(inference):
             out = self.program(*args, **kwargs)
             tr: Trace = tracer.trace
 
-            rho_addrs = {k for k in tr.nodes.keys()}
+            # rho_addrs = {k for k in tr.nodes.keys()}
+            # all_tau = [(k, rv) for k, rv in tr.nodes.items() if not_substituted(rv)]
+            # all_tau_prime = [(k, rv) for k, rv in tr.nodes.items() if is_substituted(rv)]
+            # tau_addrs = {k for k, rv in all_tau if not_observed(rv)}
+            # tau_prime_addrs = {k for k, rv in all_tau_prime if not_observed(rv)}
+            # nodes = rho_addrs - (tau_addrs - tau_prime_addrs)
+            # lp = tr.log_prob_sum(site_filter=lambda name, _: name in nodes)
 
-            all_tau = [(k, rv) for k, rv in tr.nodes.items() if not_substituted(rv)]
-            all_tau_prime = [(k, rv) for k, rv in tr.nodes.items() if is_substituted(rv)]
+            # all_addrs = {k for k in tr.nodes.keys()}
+            # sampled_addrs = {k for k, rv in tr.nodes.items() if not_substituted(rv) and not_observed(rv)}
+            # reused_addrs = {k for k, rv in tr.nodes.items() if is_substituted(rv) and not_observed(rv)}
+            # observed_or_reused = all_addrs - (sampled_addrs - reused_addrs)
+            # lp = tr.log_prob_sum(site_filter=lambda name, _: name in observed_or_reused)
 
-            tau_addrs = {k for k, rv in all_tau if not_observed(rv)}
-            tau_prime_addrs = {k for k, rv in all_tau_prime if not_observed(rv)}
-
-            lp = tr.log_prob_sum(site_filter=lambda name, _: name in rho_addrs - (
-                tau_addrs - tau_prime_addrs
-            ))
+            lp = tr.log_prob_sum(site_filter=lambda _, rv: is_substituted(rv) or is_observed(rv))
             lp = lp if isinstance(lp, Tensor) else tensor(lp)
             return Out(output=out, log_weight=lp, trace=tr)
 
