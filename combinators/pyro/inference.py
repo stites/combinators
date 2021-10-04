@@ -24,8 +24,9 @@ from combinators.pyro.traces import (
     concat_traces, assert_no_overlap,
     is_substituted,
     is_observed,
+    is_auxiliary,
     not_observed,
-    _and, _not, _or
+    _and, _not, _or,
 )
 
 @typechecked
@@ -63,37 +64,22 @@ _handler_name, _handler = _make_handler(WithSubstitutionMessenger)
 _handler.__module__ = __name__
 locals()[_handler_name] = _handler
 
-class MarginalMessenger(Messenger):
+class AuxiliaryMessenger(Messenger):
     def __init__(self) -> None:
         super().__init__()
 
     def _pyro_sample(self, msg):
-        INFER, MARGINAL = 'infer', 'in_marginal'
-        if MARGINAL in msg[INFER] and msg[INFER][MARGINAL]:
-            msg["infer"]['in_marginal'] += 1
-        else:
-            msg["infer"]['in_marginal'] = 1
+        msg['infer']['is_auxiliary'] = True
         return None
 
-_handler_name, _handler = _make_handler(MarginalMessenger)
+_handler_name, _handler = _make_handler(AuxiliaryMessenger)
 _handler.__module__ = __name__
 locals()[_handler_name] = _handler
 
 
 @typechecked
 def get_marginal(trace:Trace)->Trace:
-    level = lambda n: (
-        0 if 'in_marginal' not in n["infer"] else
-        n["infer"]['in_marginal']
-    )
-
-    mx = max(map(level, trace.nodes.values()))
-    def site_filter(_, n):
-        return level(n) == mx
-
-    m = concat_traces(trace, site_filter=site_filter)
-    return m
-
+    return concat_traces(trace, site_filter=lambda _, n: not is_auxiliary(n))
 
 @typechecked
 class inference:  # Callable[..., Out]
@@ -105,7 +91,6 @@ class inference:  # Callable[..., Out]
 class primitive(inference):
     def __init__(self, program: Callable[..., Any]):
         self.program = program
-        self._substitution_trace = None  # FIXME
 
     def __call__(self, *args, **kwargs) -> Out:
         with TraceMessenger() as tracer:
@@ -130,22 +115,14 @@ class targets(inference):
         ...
 
 
-# FIXME
-class proposals(inference):
-    def __call__(self, *args, **kwargs) -> Out:
-        ...
-
-
-#@typechecked
 class extend(targets):
     def __init__(self, p: Union[primitive, targets], f: Union[primitive, targets]):
         self.p, self.f = p, f
 
     def __call__(self, *args, **kwargs) -> Out:
-        with MarginalMessenger():
-            p_out: Out = self.p(*args, **kwargs)
+        p_out: Out = self.p(*args, **kwargs)
 
-        f_out: Out = self.f(p_out.output, *args, **kwargs)
+        f_out: Out = auxiliary(self.f)(p_out.output, *args, **kwargs)
 
         p_nodes, f_nodes = p_out.trace.nodes, f_out.trace.nodes
 
@@ -165,13 +142,7 @@ class extend(targets):
             len(set(f_nodes.keys()).intersection(set(p_nodes.keys()))) == 0
         ), f"{type(self)}: addresses must not overlap"
 
-        log_u2 = f_out.trace.log_prob_sum(site_filter=lambda _, n: not_observed(n))
-        # FIXME: how do I do something like the following:
-        #
-        #     marginal(self.p)
-        #
-        # which may, in turn, queue up marginal messages. then call the handler _outside_ of this?
-        # maybe it is by adding ~self.p = marginal(p)~ to __init__? Then extracting from propose from the extend, directly? seems like a hack.
+        log_u2 = f_out.trace.log_prob_sum(site_filter=lambda _, n: not_observed(n)) # nothing observed, checked above!
 
         return Out(
             trace=concat_traces(p_out.trace, f_out.trace),
@@ -179,6 +150,14 @@ class extend(targets):
             output=f_out.output,
         )
 
+
+# FIXME
+class proposals(inference):
+    def __call__(self, *args, **kwargs) -> Out:
+        ...
+
+
+#@typechecked
 
 @typechecked
 class compose(inference):

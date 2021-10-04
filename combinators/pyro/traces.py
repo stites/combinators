@@ -51,9 +51,11 @@ def not_observed(node: Node) -> bool:
     return not is_observed(node)
 
 @typechecked
-def is_substituted(node: Node) -> bool:
-    INFER, SUBSTITUTED = 'infer', 'substituted'
-    return SUBSTITUTED in node[INFER] and node[INFER][SUBSTITUTED]
+def _check_infer_map(k: str)-> Callable[[Node], bool]:
+    return lambda node: k in node['infer'] and node['infer'][k]
+
+is_substituted = _check_infer_map('substituted')
+is_auxiliary = _check_infer_map('is_auxiliary')
 
 @typechecked
 def is_random_variable(node: Node) -> bool:

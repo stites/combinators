@@ -1,18 +1,6 @@
 from combinators.pyro.inference import get_marginal
-from combinators.program import WithSubstitution
-from typing import NamedTuple
-from torch import Tensor, tensor
-from typing import NamedTuple, Any, Callable, Union, Optional, Tuple
-from typeguard import typechecked
+from combinators.pyro.traces import is_auxiliary
 from pyro import poutine
-from pyro.poutine import Trace
-from pyro.poutine.replay_messenger import ReplayMessenger
-from pyro.poutine.trace_messenger import (
-    TraceMessenger,
-    TraceHandler,
-    identify_dense_edges,
-)
-from pyro.poutine.messenger import Messenger
 
 import torch
 import pytest
@@ -39,16 +27,14 @@ def test_extend_unconditioned(simple2, simple4):
     assert set(out.trace.nodes.keys()) == {"x_2", "x_3", "z_2", "z_3", "z_1"}
     assert out.log_weight == p_out.log_weight + f_out.trace.log_prob_sum()
 
-    in_marginal = lambda node: 'in_marginal' in node['infer'] and node['infer']['in_marginal']
-
-    # check marginal
     p_nodes = list(filter(lambda kv: kv[0] in p_out.trace.nodes.keys(), out.trace.nodes.items()))
     assert len(p_nodes) > 0
-    assert all(list(map(lambda kv: in_marginal(kv[1]), p_nodes)))
+    assert all(list(map(lambda kv: not is_auxiliary(kv[1]), p_nodes)))
 
     f_nodes = list(filter(lambda kv: kv[0] in f_out.trace.nodes.keys(), out.trace.nodes.items()))
     assert len(f_nodes) > 0
-    assert all(list(map(lambda kv: not in_marginal(kv[1]), f_nodes)))
+    assert all(list(map(lambda kv: is_auxiliary(kv[1]), f_nodes)))
+
 
 def test_nested_marginal(simple2, simple4, simple5):
     s2, s4, s5 = primitive(simple2), primitive(simple4), primitive(simple5)
