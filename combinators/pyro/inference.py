@@ -20,13 +20,12 @@ from pyro.poutine.trace_messenger import (
 from pyro.poutine.messenger import Messenger
 from pyro.poutine.handlers import _make_handler
 
-from combinators.pyro.marginal import *
 from combinators.pyro.traces import (
     concat_traces, assert_no_overlap,
     is_substituted,
     is_observed,
     not_observed,
-    _and, _not
+    _and, _not, _or
 )
 
 @typechecked
@@ -35,7 +34,7 @@ class Out(NamedTuple):
     log_weight: Tensor
     trace: Trace
 
-class WithSubstitution(Messenger):
+class WithSubstitutionMessenger(Messenger):
     def __init__(self,
                  # program,
                  trace: Optional[Trace] = None) -> None:
@@ -60,9 +59,40 @@ class WithSubstitution(Messenger):
             msg["infer"]['substituted'] = True
         return None
 
-_handler_name, _handler = _make_handler(WithSubstitution)
+_handler_name, _handler = _make_handler(WithSubstitutionMessenger)
 _handler.__module__ = __name__
 locals()[_handler_name] = _handler
+
+class MarginalMessenger(Messenger):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def _pyro_sample(self, msg):
+        INFER, MARGINAL = 'infer', 'in_marginal'
+        if MARGINAL in msg[INFER] and msg[INFER][MARGINAL]:
+            msg["infer"]['in_marginal'] += 1
+        else:
+            msg["infer"]['in_marginal'] = 1
+        return None
+
+_handler_name, _handler = _make_handler(MarginalMessenger)
+_handler.__module__ = __name__
+locals()[_handler_name] = _handler
+
+
+@typechecked
+def get_marginal(trace:Trace)->Trace:
+    level = lambda n: (
+        0 if 'in_marginal' not in n["infer"] else
+        n["infer"]['in_marginal']
+    )
+
+    mx = max(map(level, trace.nodes.values()))
+    def site_filter(_, n):
+        return level(n) == mx
+
+    m = concat_traces(trace, site_filter=site_filter)
+    return m
 
 
 @typechecked
@@ -96,38 +126,40 @@ class primitive(inference):
 
 
 class targets(inference):
-    pass
+    def __call__(self, *args, **kwargs) -> Out:
+        ...
 
 
 # FIXME
 class proposals(inference):
-    pass
+    def __call__(self, *args, **kwargs) -> Out:
+        ...
 
-@typechecked
-class extend(inference):
-    def __init__(self, p: Union[primitive, targets], f: proposals) -> None:
+
+#@typechecked
+class extend(targets):
+    def __init__(self, p: Union[primitive, targets], f: Union[primitive, targets]):
         self.p, self.f = p, f
-        self._substitution_trace = None  # FIXME
 
     def __call__(self, *args, **kwargs) -> Out:
-        with WithSubstitution(self.p, self._substitution_trace), \
-             WithSubstitution(self.f, self._substitution_trace):
-            with MarginalMessenger():
-                p_out: Out = self.p(*args, **kwargs)
+        with MarginalMessenger():
+            p_out: Out = self.p(*args, **kwargs)
 
-            f_out: Out = self.f(p_out.output, *args, **kwargs)
+        f_out: Out = self.f(p_out.output, *args, **kwargs)
 
         p_nodes, f_nodes = p_out.trace.nodes, f_out.trace.nodes
 
-        # FIXME
-        if self._substitution_trace is None:
+        under_substitution = any(
+            [is_substituted(n) for _, n in {**p_nodes, **f_nodes}.items()]
+        )
+
+        if not under_substitution:
             assert f_out.log_weight == 0.0
-            assert (
-                len({k for k, v in f_nodes.items() if _and(is_observed, not_reused)(v)})
-                == 0
-            )
+            node_is_not = _or(is_observed, is_substituted)
         else:
-            assert len({k for k, v in f_nodes.items() if is_observed(v)}) == 0
+            node_is_not = is_observed
+
+        assert len({k for k, n in f_nodes.items() if node_is_not(n)}) == 0
 
         assert (
             len(set(f_nodes.keys()).intersection(set(p_nodes.keys()))) == 0

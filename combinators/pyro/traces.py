@@ -24,12 +24,15 @@ def concat_traces(
 )->Trace:
     newtrace = Trace()
     for tr in traces:
+        drop_edges = []
         for name, node in tr.nodes.items():
             if site_filter(name, node):
-                newtrace.add_node(name, node)
+                newtrace.add_node(name, **node)
+            else:
+                drop_edges.append(name)
         for p, s in zip(tr._pred, tr._succ):
-            # FIXME: site filter?
-            newtrace.add_edge(p, s)
+            if p not in drop_edges and s not in drop_edges:
+                newtrace.add_edge(p, s)
     return newtrace
 
 
@@ -65,7 +68,24 @@ def is_improper_random_variable(node: Node) -> bool:
 def _and(p0:Predicate, p1:Predicate)->Predicate:
     return lambda x: p0(x) and p1(x)
 
+@typechecked
+def _or(p0:Predicate, p1:Predicate)->Predicate:
+    return lambda x: p0(x) or p1(x)
 
 @typechecked
 def _not(p:Predicate)->Predicate:
     return lambda x: not p(x)
+
+# FIXME: I think not using these will cause a bug
+class provenance:
+    @staticmethod
+    def observed(cls, node):
+        return is_observed(node) and not is_substituted(node)
+
+    @staticmethod
+    def substituted(cls, node):
+        return is_substituted(node)
+
+    @staticmethod
+    def sampled(cls, node):
+        return not (is_observed(node) or is_substituted(node))

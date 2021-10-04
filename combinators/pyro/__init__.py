@@ -1,9 +1,12 @@
-from .inference import primitive, WithSubstitution, with_substitution
-from .marginal import *
+from .inference import (
+    primitive, WithSubstitutionMessenger, with_substitution,
+    extend,
+)
 from .traces import *
 
 __all__ = [
     "primitive",
-    "WithSubstitution",
+    "extend",
+    "WithSubstitutionMessenger",
     "with_substitution"
 ]

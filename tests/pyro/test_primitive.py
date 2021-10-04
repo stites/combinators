@@ -18,7 +18,7 @@ import pytest
 import pyro
 import pyro.distributions as dist
 
-from combinators.pyro import primitive, WithSubstitution, with_substitution
+from combinators.pyro import primitive, with_substitution
 
 # ===========================================================================
 # Models
