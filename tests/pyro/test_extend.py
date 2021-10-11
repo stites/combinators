@@ -1,13 +1,16 @@
 from combinators.pyro.inference import get_marginal
-from combinators.pyro.traces import is_auxiliary
+from combinators.pyro.traces import is_auxiliary, addr_filter, membership_filter
 from pyro import poutine
+from pyro.poutine import replay
 
 import torch
 import pytest
 import pyro
+from pytest import mark
 import pyro.distributions as dist
 
-from combinators.pyro import primitive, extend
+from combinators.pyro import primitive, extend, compose, with_substitution
+import combinators.debug as debug
 
 
 def test_extend_unconditioned(simple2, simple4):
@@ -15,12 +18,14 @@ def test_extend_unconditioned(simple2, simple4):
 
     p_out = s2()
     replay_s2 = poutine.replay(s2, trace=p_out.trace)
-    assert set(p_out.trace.nodes.keys()) == {"x_2", "x_3", "z_2", "z_3"}
+    tau_2 = {"z_2", "z_3", "x_2", "x_3"}
+    assert set(p_out.trace.nodes.keys()) == tau_2
     assert p_out.log_weight == p_out.trace.log_prob_sum(lambda n, _: n[0] == "x")
 
     f_out = s4(p_out.output)
     replay_s4 = poutine.replay(s4, trace=f_out.trace)
-    assert set(f_out.trace.nodes.keys()) == {"z_1"}
+    tau_star = {"z_1"}
+    assert set(f_out.trace.nodes.keys()) == tau_star
     assert f_out.log_weight == 0.0
 
     out = extend(p=replay_s2, f=replay_s4)()
@@ -38,6 +43,19 @@ def test_extend_unconditioned(simple2, simple4):
     )
     assert len(f_nodes) > 0
     assert all(list(map(lambda kv: is_auxiliary(kv[1]), f_nodes)))
+
+    # Test extend log_weight
+    trace_addrs = set(out.trace.nodes.keys())
+    m_trace_addrs = set(get_marginal(out.trace).nodes.keys())
+    assert m_trace_addrs == tau_2
+
+    aux_trace_addrs = trace_addrs - m_trace_addrs
+    assert aux_trace_addrs == tau_star
+
+    lw_2 = out.trace.log_prob_sum(
+        membership_filter({"x_2", "x_3"})
+    ) + out.trace.log_prob_sum(membership_filter({"z_1"}))
+    assert lw_2 == out.log_weight, "p_out.log_weight is not expected lw_2"
 
 
 def test_nested_marginal(simple2, simple4, simple5):
