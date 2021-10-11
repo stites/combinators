@@ -6,7 +6,7 @@ from pyro.poutine.trace_messenger import TraceMessenger
 from pyro.poutine.messenger import Messenger
 from typing import NamedTuple
 from torch import Tensor, tensor
-from typing import NamedTuple, Any, Callable, Union, Optional, Tuple
+from typing import NamedTuple, Any, Callable, Union, Optional, Tuple, Set
 from typeguard import typechecked
 from pyro.poutine import Trace
 
@@ -104,3 +104,8 @@ def node_filter(p: Callable[[Node], bool]) -> SiteFilter:
 @typechecked
 def addr_filter(p: Callable[[str], bool]) -> SiteFilter:
     return lambda name, _: p(name)
+
+
+@typechecked
+def membership_filter(members: Set[str]) -> SiteFilter:
+    return lambda name, _: name in members
