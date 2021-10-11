@@ -1,9 +1,18 @@
 from .inference import (
     primitive,
+    extend,
+    compose,
+    propose,
     WithSubstitutionMessenger,
     with_substitution,
-    extend,
 )
 from .traces import *
 
-__all__ = ["primitive", "extend", "WithSubstitutionMessenger", "with_substitution"]
+__all__ = [
+    "primitive",
+    "extend",
+    "compose",
+    "propose",
+    "WithSubstitutionMessenger",
+    "with_substitution",
+]
