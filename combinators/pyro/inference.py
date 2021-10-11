@@ -175,23 +175,24 @@ class propose(proposals):
         p_out = with_substitution(self.p, trace=q_out.trace)(*args, **kwargs)
 
         rho_1 = set(q_out.trace.nodes.keys())
-        tau_filter = _and(not_observed, is_random_variable)
-        tau_1 = set({k for k, v in q_out.trace.items() if tau_filter(v)})
-        tau_2 = set({k for k, v in p_out.trace.items() if tau_filter(v)})
-
-        nodes = rho_1 - (tau_1 - tau_2)
+        # tau_filter = _and(not_observed, is_random_variable)
+        tau_filter = not_observed
+        tau_1 = set({k for k, v in q_out.trace.nodes.items() if tau_filter(v)})
+        tau_2 = set({k for k, v in p_out.trace.nodes.items() if tau_filter(v)})
 
         # FIXME this hook exists to reshape NVI for stl
         # q_trace = dispatch(self.transf_q_trace, q_out.trace, **inf_kwargs)
-        lu_1 = q_out.trace.log_joint(site_filter=lambda _, site: site in nodes)
+        lu_1 = q_out.trace.log_prob_sum(membership_filter(rho_1 - (tau_1 - tau_2)))
         lw_1 = q_out.log_weight
 
         # We call that lv because its the incremental weight in the IS sense
         lv = p_out.log_weight - lu_1
         lw_out = lw_1 + lv
 
-        m_trace = get_marginal(p_out)
-        m_output = m_trace["_RETURN"]  # FIXME, not accounted for
+        m_trace = get_marginal(p_out.trace)
+        # FIXME: this is not accounted for -- will return the final kernel output, not the initial output
+        # should be something like: m_output = m_trace["_RETURN"]
+        m_output = p_out.output
 
         return Out(
             # FIXME local gradient computations
