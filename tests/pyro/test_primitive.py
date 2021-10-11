@@ -1,24 +1,13 @@
-from combinators.program import WithSubstitution
-from typing import NamedTuple
 from torch import Tensor, tensor
-from typing import NamedTuple, Any, Callable, Union, Optional, Tuple
-from typeguard import typechecked
 from pyro import poutine
 from pyro.poutine import Trace
-from pyro.poutine.replay_messenger import ReplayMessenger
-from pyro.poutine.trace_messenger import (
-    TraceMessenger,
-    TraceHandler,
-    identify_dense_edges,
-)
-from pyro.poutine.messenger import Messenger
-
-import torch
 import pytest
 import pyro
 import pyro.distributions as dist
 
 from combinators.pyro import primitive, with_substitution
+from combinators.pyro import *
+from combinators.pyro.traces import membership_filter, addr_filter
 
 # ===========================================================================
 # Models
@@ -110,13 +99,34 @@ def test_with_substitution(model0):
     assert q_out.log_weight != 0.0
 
 
-# import tests from test_inference.py
-def test_run_a_primitive_program(simple1):
+def starts_with_x(n):
+    return n[0] == "x"
+
+
+# test simple programs
+def test_simple1(simple1):
     s1_out = primitive(simple1)()
     assert set(s1_out.trace.nodes.keys()) == {"z_1", "z_2", "x_1", "x_2"}
-    assert s1_out.log_weight == s1_out.trace.log_prob_sum(
-        site_filter=lambda name, _: name in {"x_1", "x_2"}
-    )
+    assert s1_out.log_weight == s1_out.trace.log_prob_sum(addr_filter(starts_with_x))
+
+
+def test_simple2(simple2):
+    out = primitive(simple2)()
+    assert set(out.trace.nodes.keys()) == {"x_2", "x_3", "z_2", "z_3"}
+    assert out.log_weight == out.trace.log_prob_sum(addr_filter(starts_with_x))
+    assert out.log_weight != 0.0
+
+
+def test_simple3(simple3):
+    out = primitive(simple3)()
+    assert set(out.trace.nodes.keys()) == {"z_3", "x_3"}
+    assert out.log_weight == out.trace.log_prob_sum(addr_filter(starts_with_x))
+
+
+def test_simple4(simple4):
+    out = primitive(simple4)(tensor([1]))
+    assert set(out.trace.nodes.keys()) == {"z_1"}
+    assert out.log_weight == 0.0
 
 
 def test_simple_substitution(simple1, simple2):
@@ -128,7 +138,7 @@ def test_simple_substitution(simple1, simple2):
     tau_f_addrs = {"z_2", "z_3"}
     tau_p_addrs = {"z_1", "z_2"}
     nodes = rho_f_addrs - (tau_f_addrs - tau_p_addrs)
-    lw_out = s2_out.trace.log_prob_sum(site_filter=lambda name, _: name in nodes)
+    lw_out = s2_out.trace.log_prob_sum(membership_filter(nodes))
 
     assert (lw_out == s2_out.log_weight).all()
     assert len(set({"z_1", "x_1"}).intersection(set(s2_out.trace.nodes.keys()))) == 0
