@@ -23,6 +23,7 @@ from combinators.pyro.traces import (
     not_observed,
     not_substituted,
     node_filter,
+    membership_filter,
     _and,
     _or,
 )
@@ -37,13 +38,18 @@ class Out(NamedTuple):
 
 class WithSubstitutionMessenger(ReplayMessenger):
     def _pyro_sample(self, msg):
-        super()._pyro_sample(msg)
-        if (
+        orig_infer = msg["infer"]
+        yes_substitute = (
             self.trace is not None
             and msg["name"] in self.trace
             and not msg["is_observed"]
-        ):
-            msg["infer"]["substituted"] = True
+        )
+        super()._pyro_sample(msg)
+        if yes_substitute:
+            new_infer = msg["infer"]
+            orig_infer.update(new_infer)
+            orig_infer["substituted"] = True
+            msg["infer"] = orig_infer
 
 
 _handler_name, _handler = _make_handler(WithSubstitutionMessenger)
@@ -57,7 +63,6 @@ class AuxiliaryMessenger(Messenger):
 
     def _pyro_sample(self, msg):
         msg["infer"]["is_auxiliary"] = True
-        return None
 
 
 _handler_name, _handler = _make_handler(AuxiliaryMessenger)
